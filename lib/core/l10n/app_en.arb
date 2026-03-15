@@ -1,0 +1,11 @@
+{
+  "@@locale": "en",
+  "appTitle": "WoW QAddOns Manager",
+  "homeTitle": "Dashboard",
+  "settingsTitle": "Settings",
+  "themeLight": "Light Theme",
+  "themeDark": "Dark Theme",
+  "language": "Language",
+  "scanTitle": "Scan for Game Clients",
+  "noClientsFound": "No WoW clients found. Please select directory manually."
+}

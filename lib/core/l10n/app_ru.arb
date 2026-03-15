@@ -1,0 +1,11 @@
+{
+  "@@locale": "ru",
+  "appTitle": "WoW QAddOns Менеджер",
+  "homeTitle": "Панель управления",
+  "settingsTitle": "Настройки",
+  "themeLight": "Светлая тема",
+  "themeDark": "Темная тема",
+  "language": "Язык",
+  "scanTitle": "Поиск игровых клиентов",
+  "noClientsFound": "Клиенты WoW не найдены. Пожалуйста, выберите папку вручную."
+}
