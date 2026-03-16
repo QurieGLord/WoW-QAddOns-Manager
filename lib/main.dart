@@ -14,9 +14,9 @@ import 'package:wow_qaddons_manager/domain/models/game_client.dart';
 import 'package:wow_qaddons_manager/data/network/curseforge_client.dart';
 import 'package:wow_qaddons_manager/data/network/curseforge_provider.dart';
 import 'package:wow_qaddons_manager/data/network/github_provider.dart';
-import 'package:wow_qaddons_manager/data/network/wago_provider.dart';
 import 'package:wow_qaddons_manager/data/services/addon_search_service.dart';
 import 'package:wow_qaddons_manager/data/services/addon_installer_service.dart';
+import 'package:wow_qaddons_manager/data/services/addon_registry_service.dart';
 import 'package:wow_qaddons_manager/domain/models/addon_item.dart';
 import 'package:wow_qaddons_manager/domain/models/installed_addon.dart';
 
@@ -30,33 +30,63 @@ final addonSearchServiceProvider = Provider((ref) {
   return AddonSearchService([
     CurseForgeProvider(cfClient),
     GitHubProvider(),
-    WagoProvider(),
   ]);
 });
 
 final addonInstallerServiceProvider = Provider((ref) => AddonInstallerService());
+final addonRegistryServiceProvider = Provider((ref) => AddonRegistryService());
 
 // Состояние установленных аддонов
-class LocalAddonsNotifier extends StateNotifier<AsyncValue<List<InstalledAddon>>> {
-  final AddonInstallerService _service;
+class LocalAddonsNotifier extends StateNotifier<AsyncValue<List<InstalledAddonGroup>>> {
+  final AddonInstallerService _installer;
+  final AddonRegistryService _registry;
   final GameClient _client;
-  LocalAddonsNotifier(this._service, this._client) : super(const AsyncValue.loading()) {
+  LocalAddonsNotifier(this._installer, this._registry, this._client) : super(const AsyncValue.loading()) {
     refresh();
   }
 
   Future<void> refresh() async {
     state = const AsyncValue.loading();
     try {
-      final addons = await _service.getInstalledAddons(_client);
+      final scannedFolders = await _installer.scanInstalledFolders(_client);
+      final addons = await _registry.loadAddonGroups(_client, scannedFolders);
       state = AsyncValue.data(addons);
     } catch (e, s) {
       state = AsyncValue.error(e, s);
     }
   }
 
-  Future<void> deleteAddon(String folderName) async {
+  Future<void> registerInstalledAddon(AddonItem addon, List<String> installedFolders) async {
     try {
-      await _service.deleteAddon(_client, folderName);
+      await _registry.registerInstallation(
+        _client,
+        addon: addon,
+        installedFolders: installedFolders,
+      );
+      await refresh();
+    } catch (e) {
+      await refresh();
+      rethrow;
+    }
+  }
+
+  Future<void> deleteAddon(InstalledAddonGroup group) async {
+    try {
+      await _installer.deleteAddon(_client, group);
+      await _registry.removeGroup(_client, group);
+      await refresh();
+    } catch (e) {
+      await refresh();
+      rethrow;
+    }
+  }
+
+  Future<void> deleteAddons(List<InstalledAddonGroup> groups) async {
+    try {
+      for (final group in groups) {
+        await _installer.deleteAddon(_client, group);
+        await _registry.removeGroup(_client, group);
+      }
       await refresh();
     } catch (e) {
       await refresh();
@@ -65,8 +95,12 @@ class LocalAddonsNotifier extends StateNotifier<AsyncValue<List<InstalledAddon>>
   }
 }
 
-final localAddonsProvider = StateNotifierProvider.family<LocalAddonsNotifier, AsyncValue<List<InstalledAddon>>, GameClient>((ref, client) {
-  return LocalAddonsNotifier(ref.read(addonInstallerServiceProvider), client);
+final localAddonsProvider = StateNotifierProvider.family<LocalAddonsNotifier, AsyncValue<List<InstalledAddonGroup>>, GameClient>((ref, client) {
+  return LocalAddonsNotifier(
+    ref.read(addonInstallerServiceProvider),
+    ref.read(addonRegistryServiceProvider),
+    client,
+  );
 });
 
 // Состояние поиска аддонов
@@ -74,15 +108,15 @@ class SearchResultsNotifier extends StateNotifier<AsyncValue<List<AddonItem>>> {
   final AddonSearchService _searchService;
   SearchResultsNotifier(this._searchService) : super(const AsyncValue.data([]));
 
-  Future<void> search(String query, {String? gameVersion}) async {
-    if (query.isEmpty) {
+  Future<void> search(String query, {required String gameVersion}) async {
+    if (query.isEmpty || gameVersion.trim().isEmpty) {
       state = const AsyncValue.data([]);
       return;
     }
     state = const AsyncValue.loading();
     try {
       // Провайдеры уже обернуты в catchError внутри сервиса, но добавим доп. защиту
-      final results = await _searchService.searchAll(query, gameVersion ?? '');
+      final results = await _searchService.searchAll(query, gameVersion);
       state = AsyncValue.data(results);
     } catch (e, s) {
       state = AsyncValue.error(e, s);
@@ -169,6 +203,13 @@ class AppLocalizationsStub {
   static String confirmDeleteMessage(String locale, String name) => locale == 'ru' ? 'Вы уверены, что хотите удалить $name?' : 'Are you sure you want to delete $name?';
   static String cancel(String locale) => locale == 'ru' ? 'Отмена' : 'Cancel';
   static String noLocalAddons(String locale) => locale == 'ru' ? 'Установленные аддоны не найдены' : 'No installed addons found';
+  static String scanAddons(String locale) => locale == 'ru' ? 'Сканировать' : 'Scan';
+  static String refreshAddons(String locale) => locale == 'ru' ? 'Обновить список' : 'Refresh list';
+  static String deleteSelected(String locale) => locale == 'ru' ? 'Удалить выбранные' : 'Delete selected';
+  static String selectedCount(String locale, int count) => locale == 'ru' ? 'Выбрано: $count' : 'Selected: $count';
+  static String addonFolders(String locale, int count) => locale == 'ru' ? 'Папок: $count' : 'Folders: $count';
+  static String localManual(String locale) => locale == 'ru' ? 'Вручную' : 'Manual';
+  static String clearSelection(String locale) => locale == 'ru' ? 'Снять выбор' : 'Clear selection';
 }
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -562,7 +603,9 @@ class ClientDetailsScreen extends ConsumerStatefulWidget {
 
 class _ClientDetailsScreenState extends ConsumerState<ClientDetailsScreen> {
   final PageController _pageController = PageController();
+  final GlobalKey<_LocalAddonsViewState> _localAddonsKey = GlobalKey<_LocalAddonsViewState>();
   int _currentIndex = 0;
+  int _selectedLocalAddons = 0;
 
   void _onNavTap(int index) {
     setState(() => _currentIndex = index);
@@ -581,17 +624,36 @@ class _ClientDetailsScreenState extends ConsumerState<ClientDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final locale = ref.watch(appSettingsProvider).locale.languageCode;
+    final isSelectionMode = _currentIndex == 0 && _selectedLocalAddons > 0;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.client.displayName ?? 'Client Details'),
+        title: Text(
+          isSelectionMode
+              ? AppLocalizationsStub.selectedCount(locale, _selectedLocalAddons)
+              : (widget.client.displayName ?? 'Client Details'),
+        ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.delete_outline_rounded),
-            onPressed: () async {
-              await ref.read(clientListProvider.notifier).removeClient(widget.client.id);
-              if (context.mounted) Navigator.pop(context);
-            },
-          ),
+          if (isSelectionMode) ...[
+            IconButton(
+              tooltip: AppLocalizationsStub.deleteSelected(locale),
+              icon: const Icon(Icons.delete_sweep_rounded),
+              onPressed: () => _localAddonsKey.currentState?.deleteSelectedFromAppBar(),
+            ),
+            IconButton(
+              tooltip: AppLocalizationsStub.clearSelection(locale),
+              icon: const Icon(Icons.close_rounded),
+              onPressed: () => _localAddonsKey.currentState?.clearSelection(),
+            ),
+          ] else
+            IconButton(
+              icon: const Icon(Icons.delete_outline_rounded),
+              onPressed: () async {
+                await ref.read(clientListProvider.notifier).removeClient(widget.client.id);
+                if (context.mounted) Navigator.pop(context);
+              },
+            ),
           const SizedBox(width: 8),
         ],
       ),
@@ -601,7 +663,15 @@ class _ClientDetailsScreenState extends ConsumerState<ClientDetailsScreen> {
             controller: _pageController,
             physics: const NeverScrollableScrollPhysics(),
             children: [
-              _LocalAddonsView(client: widget.client),
+              _LocalAddonsView(
+                key: _localAddonsKey,
+                client: widget.client,
+                onSelectionChanged: (count) {
+                  if (_selectedLocalAddons != count) {
+                    setState(() => _selectedLocalAddons = count);
+                  }
+                },
+              ),
               _SearchAddonsView(client: widget.client),
             ],
           ),
@@ -709,16 +779,57 @@ class _DetailsNavItem extends StatelessWidget {
   }
 }
 
-class _LocalAddonsView extends ConsumerWidget {
+class _LocalAddonsView extends ConsumerStatefulWidget {
   final GameClient client;
-  const _LocalAddonsView({required this.client});
+  final ValueChanged<int>? onSelectionChanged;
 
-  Future<void> _handleDelete(BuildContext context, WidgetRef ref, InstalledAddon addon, String locale) async {
+  const _LocalAddonsView({
+    super.key,
+    required this.client,
+    this.onSelectionChanged,
+  });
+
+  @override
+  ConsumerState<_LocalAddonsView> createState() => _LocalAddonsViewState();
+}
+
+class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
+  final Set<String> _selectedIds = <String>{};
+
+  void clearSelection() {
+    if (_selectedIds.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _selectedIds.clear();
+    });
+    widget.onSelectionChanged?.call(0);
+  }
+
+  Future<void> deleteSelectedFromAppBar() async {
+    final locale = ref.read(appSettingsProvider).locale.languageCode;
+    final groups = ref.read(localAddonsProvider(widget.client)).valueOrNull ?? const <InstalledAddonGroup>[];
+    final selectedGroups = groups.where((group) => _selectedIds.contains(group.id)).toList();
+    if (selectedGroups.isEmpty) {
+      clearSelection();
+      return;
+    }
+
+    await _handleDeleteGroups(selectedGroups, locale);
+  }
+
+  Future<void> _handleDeleteGroups(List<InstalledAddonGroup> groups, String locale) async {
+    final theme = Theme.of(context);
+    final displayName = groups.length == 1
+        ? groups.first.displayName
+        : AppLocalizationsStub.selectedCount(locale, groups.length);
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(AppLocalizationsStub.confirmDeleteTitle(locale)),
-        content: Text(AppLocalizationsStub.confirmDeleteMessage(locale, addon.displayName)),
+        content: Text(AppLocalizationsStub.confirmDeleteMessage(locale, displayName)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -726,79 +837,307 @@ class _LocalAddonsView extends ConsumerWidget {
           ),
           FilledButton.tonal(
             onPressed: () => Navigator.pop(context, true),
-            child: Text(AppLocalizationsStub.delete(locale)),
+            child: Text(
+              groups.length == 1
+                  ? AppLocalizationsStub.delete(locale)
+                  : AppLocalizationsStub.deleteSelected(locale),
+            ),
           ),
         ],
       ),
     );
 
-    if (confirmed == true) {
-      try {
-        await ref.read(localAddonsProvider(client).notifier).deleteAddon(addon.folderName);
-      } catch (e) {
-        if (context.mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('${AppLocalizationsStub.installError(locale)}: $e'),
-              backgroundColor: Theme.of(context).colorScheme.error,
-            ),
-          );
-        }
+    if (confirmed != true) {
+      return;
+    }
+
+    try {
+      if (groups.length == 1) {
+        await ref.read(localAddonsProvider(widget.client).notifier).deleteAddon(groups.first);
+      } else {
+        await ref.read(localAddonsProvider(widget.client).notifier).deleteAddons(groups);
       }
+
+      clearSelection();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${AppLocalizationsStub.installError(locale)}: $error'),
+          backgroundColor: theme.colorScheme.error,
+        ),
+      );
     }
   }
 
+  void _toggleSelection(String groupId) {
+    setState(() {
+      if (_selectedIds.contains(groupId)) {
+        _selectedIds.remove(groupId);
+      } else {
+        _selectedIds.add(groupId);
+      }
+    });
+    widget.onSelectionChanged?.call(_selectedIds.length);
+  }
+
+  void _syncSelection(List<InstalledAddonGroup> groups) {
+    final validIds = groups.map((group) => group.id).toSet();
+    final selectedIds = _selectedIds.where(validIds.contains).toSet();
+    if (selectedIds.length == _selectedIds.length) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _selectedIds
+          ..clear()
+          ..addAll(selectedIds);
+      });
+      widget.onSelectionChanged?.call(_selectedIds.length);
+    });
+  }
+
+  Widget _buildActionBar(BuildContext context, String locale) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isSelectionMode = _selectedIds.isNotEmpty;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        decoration: BoxDecoration(
+          color: isSelectionMode ? colorScheme.primaryContainer : colorScheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: (isSelectionMode ? colorScheme.primary : colorScheme.outlineVariant).withValues(alpha: 0.25),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isSelectionMode ? Icons.checklist_rounded : Icons.inventory_2_rounded,
+              color: isSelectionMode ? colorScheme.onPrimaryContainer : colorScheme.primary,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isSelectionMode
+                        ? AppLocalizationsStub.selectedCount(locale, _selectedIds.length)
+                        : AppLocalizationsStub.myAddons(locale),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: isSelectionMode ? colorScheme.onPrimaryContainer : colorScheme.onSurface,
+                        ),
+                  ),
+                  Text(
+                    isSelectionMode
+                        ? AppLocalizationsStub.deleteSelected(locale)
+                        : AppLocalizationsStub.refreshAddons(locale),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: isSelectionMode
+                              ? colorScheme.onPrimaryContainer.withValues(alpha: 0.8)
+                              : colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton.filledTonal(
+              tooltip: AppLocalizationsStub.scanAddons(locale),
+              onPressed: () => ref.read(localAddonsProvider(widget.client).notifier).refresh(),
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+            if (isSelectionMode) ...[
+              const SizedBox(width: 8),
+              IconButton.filled(
+                tooltip: AppLocalizationsStub.deleteSelected(locale),
+                onPressed: deleteSelectedFromAppBar,
+                icon: const Icon(Icons.delete_sweep_rounded),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final locale = ref.watch(appSettingsProvider).locale.languageCode;
     final colorScheme = Theme.of(context).colorScheme;
-    final addonsAsync = ref.watch(localAddonsProvider(client));
+    final addonsAsync = ref.watch(localAddonsProvider(widget.client));
 
     return Column(
       children: [
-        _ClientHeader(client: client),
+        _ClientHeader(client: widget.client),
+        _buildActionBar(context, locale),
+        const SizedBox(height: 16),
         Expanded(
           child: addonsAsync.when(
             data: (addons) {
+              _syncSelection(addons);
+
               if (addons.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                return RefreshIndicator(
+                  onRefresh: () => ref.read(localAddonsProvider(widget.client).notifier).refresh(),
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 140),
                     children: [
+                      const SizedBox(height: 120),
                       Icon(Icons.inventory_2_outlined, size: 64, color: colorScheme.outlineVariant),
                       const SizedBox(height: 16),
                       Text(
                         AppLocalizationsStub.noLocalAddons(locale),
+                        textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: colorScheme.outline),
                       ),
                     ],
                   ),
                 );
               }
-              return ListView.separated(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 120),
-                itemCount: addons.length,
-                separatorBuilder: (context, index) => const SizedBox(height: 8),
-                itemBuilder: (context, index) => Card(
-                  elevation: 0,
-                  color: colorScheme.surfaceContainerLow,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    side: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
-                  ),
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    leading: CircleAvatar(
-                      backgroundColor: colorScheme.secondaryContainer,
-                      child: Icon(Icons.folder_open_rounded, color: colorScheme.onSecondaryContainer, size: 20),
-                    ),
-                    title: Text(addons[index].displayName, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline_rounded),
-                      color: colorScheme.error,
-                      onPressed: () => _handleDelete(context, ref, addons[index], locale),
-                    ),
-                  ),
+
+              return RefreshIndicator(
+                onRefresh: () => ref.read(localAddonsProvider(widget.client).notifier).refresh(),
+                child: ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 140),
+                  itemCount: addons.length,
+                  separatorBuilder: (context, index) => const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final addon = addons[index];
+                    final isSelected = _selectedIds.contains(addon.id);
+
+                    return Card(
+                      elevation: 0,
+                      clipBehavior: Clip.antiAlias,
+                      color: isSelected
+                          ? colorScheme.secondaryContainer.withValues(alpha: 0.55)
+                          : colorScheme.surfaceContainerLow,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        side: BorderSide(
+                          color: (isSelected ? colorScheme.secondary : colorScheme.outlineVariant).withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: Theme(
+                        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                        child: ExpansionTile(
+                          backgroundColor: Colors.transparent,
+                          collapsedBackgroundColor: Colors.transparent,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                          collapsedShape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                          leading: Checkbox(
+                            value: isSelected,
+                            onChanged: (_) => _toggleSelection(addon.id),
+                          ),
+                          title: GestureDetector(
+                            onLongPress: () => _toggleSelection(addon.id),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  backgroundColor: addon.isManaged
+                                      ? colorScheme.primaryContainer
+                                      : colorScheme.secondaryContainer,
+                                  child: Icon(
+                                    addon.isManaged ? Icons.cloud_done_rounded : Icons.folder_rounded,
+                                    color: addon.isManaged
+                                        ? colorScheme.onPrimaryContainer
+                                        : colorScheme.onSecondaryContainer,
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        addon.displayName,
+                                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        children: [
+                                          _InfoChip(
+                                            icon: Icons.folder_copy_outlined,
+                                            label: AppLocalizationsStub.addonFolders(
+                                              locale,
+                                              addon.installedFolders.length,
+                                            ),
+                                          ),
+                                          _InfoChip(
+                                            icon: addon.isManaged ? Icons.link_rounded : Icons.home_repair_service_rounded,
+                                            label: addon.providerName ?? AppLocalizationsStub.localManual(locale),
+                                          ),
+                                          if ((addon.version ?? '').isNotEmpty)
+                                            _InfoChip(
+                                              icon: Icons.sell_outlined,
+                                              label: addon.version!,
+                                            ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          children: [
+                            for (final folderName in addon.installedFolders)
+                              Container(
+                                margin: const EdgeInsets.only(top: 8),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                decoration: BoxDecoration(
+                                  color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.subdirectory_arrow_right_rounded, color: colorScheme.primary),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        folderName,
+                                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            const SizedBox(height: 12),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: FilledButton.tonalIcon(
+                                onPressed: () => _handleDeleteGroups([addon], locale),
+                                icon: const Icon(Icons.delete_outline_rounded),
+                                label: Text(AppLocalizationsStub.delete(locale)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
                 ),
               );
             },
@@ -807,6 +1146,42 @@ class _LocalAddonsView extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _InfoChip({
+    required this.icon,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: colorScheme.primary),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: colorScheme.onSurface,
+                ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -850,7 +1225,7 @@ class _SearchAddonsViewState extends ConsumerState<_SearchAddonsView> {
                   icon: const Icon(Icons.clear_rounded),
                   onPressed: () {
                     _searchController.clear();
-                    ref.read(searchResultsProvider.notifier).search('');
+                    ref.read(searchResultsProvider.notifier).search('', gameVersion: widget.client.version);
                   },
                 ),
             ],
@@ -884,7 +1259,6 @@ class _SearchAddonsViewState extends ConsumerState<_SearchAddonsView> {
                 itemBuilder: (context, index) => AddonSearchResultTile(
                   mod: mods[index],
                   client: widget.client,
-                  onInstalled: () => ref.read(localAddonsProvider(widget.client).notifier).refresh(),
                 ),
               );
             },
@@ -945,7 +1319,7 @@ class _ClientHeader extends StatelessWidget {
 class AddonSearchResultTile extends ConsumerStatefulWidget {
   final AddonItem mod;
   final GameClient client;
-  final VoidCallback? onInstalled;
+  final ValueChanged<List<String>>? onInstalled;
   const AddonSearchResultTile({super.key, required this.mod, required this.client, this.onInstalled});
 
   @override
@@ -975,8 +1349,11 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
           ),
         );
       } else {
-        await installer.installAddon(info.url, info.fileName, widget.client);
-        widget.onInstalled?.call();
+        final result = await installer.installAddon(info.url, info.fileName, widget.client);
+        await ref
+            .read(localAddonsProvider(widget.client).notifier)
+            .registerInstalledAddon(widget.mod, result.installedFolders);
+        widget.onInstalled?.call(result.installedFolders);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1119,7 +1496,6 @@ class _ProviderBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isCF = providerName == 'CurseForge';
-    final isWago = providerName == 'Wago';
     
     Color bgColor = Colors.grey.shade200;
     Color textColor = Colors.black87;
@@ -1129,10 +1505,6 @@ class _ProviderBadge extends StatelessWidget {
       bgColor = Colors.deepPurple.shade100;
       textColor = Colors.deepPurple.shade900;
       borderColor = Colors.deepPurple.shade200;
-    } else if (isWago) {
-      bgColor = Colors.amber.shade100;
-      textColor = Colors.amber.shade900;
-      borderColor = Colors.amber.shade200;
     }
 
     return Container(

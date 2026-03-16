@@ -1,6 +1,7 @@
 import 'dart:io';
-import 'package:dio/dio.dart';
+
 import 'package:archive/archive.dart';
+import 'package:dio/dio.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:wow_qaddons_manager/domain/models/game_client.dart';
@@ -9,179 +10,362 @@ import 'package:wow_qaddons_manager/domain/models/installed_addon.dart';
 class AddonInstallerService {
   final Dio _dio = Dio();
 
-  /// Скачивание и установка аддона (Алгоритм Safe Extraction)
-  Future<void> installAddon(String downloadUrl, String fileName, GameClient client) async {
-    final addonsPath = p.join(client.path, 'Interface', 'AddOns');
-    final addonsDir = Directory(addonsPath);
-    if (!await addonsDir.exists()) {
-      await addonsDir.create(recursive: true);
-    }
-
-    // 1. Создаем временную директорию для карантина
+  Future<AddonInstallResult> installAddon(
+    String downloadUrl,
+    String fileName,
+    GameClient client,
+  ) async {
+    final addonsDir = await _ensureAddonsDirectory(client);
     final systemTempDir = await getTemporaryDirectory();
-    final uniqueId = DateTime.now().millisecondsSinceEpoch.toString();
+    final uniqueId = DateTime.now().microsecondsSinceEpoch.toString();
     final tempExtractDir = Directory(p.join(systemTempDir.path, 'extract_$uniqueId'));
-    await tempExtractDir.create(recursive: true);
-
     final tempZipPath = p.join(systemTempDir.path, '$uniqueId.zip');
 
+    await tempExtractDir.create(recursive: true);
+
     try {
-      // 2. Скачивание
       await _dio.download(downloadUrl, tempZipPath);
 
-      // 3. Распаковка во временную папку
       final bytes = await File(tempZipPath).readAsBytes();
       final archive = ZipDecoder().decodeBytes(bytes);
+      await _extractArchive(archive, tempExtractDir.path);
 
-      for (final file in archive) {
-        final filePath = p.join(tempExtractDir.path, file.name);
-        if (file.isFile) {
-          final outFile = File(filePath);
-          await outFile.create(recursive: true);
-          await outFile.writeAsBytes(file.content as List<int>);
-        } else {
-          await Directory(filePath).create(recursive: true);
-        }
+      final addonRoots = await _collectAddonRoots(tempExtractDir);
+      if (addonRoots.isEmpty) {
+        throw Exception('NO_TOC_FOLDERS_FOUND');
       }
 
-      // 4. Анализ содержимого карантина
-      final entities = await tempExtractDir.list().toList();
-      final topLevelFiles = entities.whereType<File>().toList();
-      final topLevelDirs = entities.whereType<Directory>().toList();
-
-      final bool hasTocInRoot = topLevelFiles.any((f) => f.path.toLowerCase().endsWith('.toc'));
-
-      // Case A: Плоская структура (файлы .toc в корне архива)
-      if (hasTocInRoot) {
-        // Создаем папку по имени файла (чистое имя)
-        final cleanName = fileName.replaceAll('.zip', '').split('-').first.split('_').first;
-        final targetPath = p.join(addonsPath, cleanName);
-        await _moveDirectoryContent(tempExtractDir.path, targetPath);
-      } 
-      // Case B: Одна папка в корне (например, Repo-master)
-      else if (topLevelDirs.length == 1 && topLevelFiles.length < 5) {
-        final sourceDir = topLevelDirs.first;
-        var cleanName = p.basename(sourceDir.path);
-        // Очищаем от мусора GitHub/GitLab
-        cleanName = cleanName.replaceAll(RegExp(r'-(master|main|v\d+.*)$'), '');
-        
-        final targetPath = p.join(addonsPath, cleanName);
-        await _moveDirectoryContent(sourceDir.path, targetPath);
-      }
-      // Case C: Аддон-пак (несколько папок в корне)
-      else {
-        for (var dir in topLevelDirs) {
-          // Проверяем, есть ли .toc внутри этой папки, чтобы не тащить мусор
-          final hasToc = await Directory(dir.path).list().any((e) => e is File && e.path.toLowerCase().endsWith('.toc'));
-          if (hasToc) {
-            final targetPath = p.join(addonsPath, p.basename(dir.path));
-            await _moveDirectoryContent(dir.path, targetPath);
-          }
-        }
-      }
-    } finally {
-      // 5. Тотальная очистка
-      if (await tempExtractDir.exists()) {
-        await tempExtractDir.delete(recursive: true);
-      }
-      final zFile = File(tempZipPath);
-      if (await zFile.exists()) {
-        await zFile.delete();
-      }
-    }
-  }
-
-  /// Вспомогательный метод для рекурсивного перемещения содержимого
-  Future<void> _moveDirectoryContent(String source, String target) async {
-    final sourceDir = Directory(source);
-    final targetDir = Directory(target);
-    if (!await targetDir.exists()) {
-      await targetDir.create(recursive: true);
-    }
-
-    await for (final entity in sourceDir.list(recursive: false)) {
-      final name = p.basename(entity.path);
-      final newPath = p.join(target, name);
-
-      if (entity is File) {
-        await entity.copy(newPath);
-      } else if (entity is Directory) {
-        await _moveDirectoryContent(entity.path, newPath);
-      }
-    }
-  }
-
-  /// Получение списка установленных аддонов (названия из TOC или папок)
-  Future<List<InstalledAddon>> getInstalledAddons(GameClient client) async {
-    final addonsPath = p.join(client.path, 'Interface', 'AddOns');
-    final directory = Directory(addonsPath);
-
-    if (!await directory.exists()) {
-      return [];
-    }
-
-    final List<InstalledAddon> addons = [];
-    final List<FileSystemEntity> entities = await directory.list().toList();
-
-    for (var entity in entities) {
-      if (entity is Directory) {
-        final folderName = p.basename(entity.path);
-        
-        // 1. Пропускаем системные папки Blizzard
-        if (folderName.startsWith('Blizzard_')) continue;
-
-        // 2. Ищем .toc файл внутри папки (имя файла должно совпадать с папкой или быть единственным .toc)
-        final tocFiles = await entity.list().where((f) => f is File && f.path.toLowerCase().endsWith('.toc')).toList();
-        
-        if (tocFiles.isEmpty) {
-          // Если .toc нет - это не аддон (может быть папка core, textures и т.д.)
+      final installedFolders = <String>{};
+      for (final root in addonRoots) {
+        final targetFolderName = await _resolveTargetFolderName(root, fileName);
+        if (targetFolderName == null || targetFolderName.trim().isEmpty) {
           continue;
         }
 
-        // 3. Пытаемся прочитать ## Title из .toc файла
-        String displayName = folderName;
-        try {
-          // Ищем .toc с именем папки, если нет - берем первый попавшийся
-          final tocFile = tocFiles.firstWhere(
-            (f) => p.basename(f.path).toLowerCase() == '${folderName.toLowerCase()}.toc',
-            orElse: () => tocFiles.first,
-          ) as File;
-
-          final lines = await tocFile.readAsLines();
-          for (var line in lines) {
-            if (line.trim().startsWith('## Title:')) {
-              final title = line.replaceFirst('## Title:', '').trim();
-              if (title.isNotEmpty) {
-                // Очищаем от цветовых кодов WoW (|cffXXXXXX...|r)
-                displayName = title.replaceAll(RegExp(r'\|c[0-9a-fA-F]{8}'), '').replaceAll('|r', '');
-                break;
-              }
-            }
-          }
-        } catch (e) {
-          // В случае ошибки чтения оставляем имя папки
+        final targetDir = Directory(p.join(addonsDir.path, targetFolderName));
+        if (await targetDir.exists()) {
+          await targetDir.delete(recursive: true);
         }
 
-        addons.add(InstalledAddon(folderName: folderName, displayName: displayName));
+        await _copyAddonRoot(root, targetDir);
+        installedFolders.add(targetFolderName);
+      }
+
+      if (installedFolders.isEmpty) {
+        throw Exception('NO_VALID_ADDON_CONTENT');
+      }
+
+      return AddonInstallResult(
+        installedFolders: installedFolders.toList()..sort(),
+      );
+    } finally {
+      await _safeDeleteDirectory(tempExtractDir);
+      await _safeDeleteFile(File(tempZipPath));
+    }
+  }
+
+  Future<List<InstalledAddonFolder>> scanInstalledFolders(GameClient client) async {
+    final addonsDir = Directory(p.join(client.path, 'Interface', 'AddOns'));
+    if (!await addonsDir.exists()) {
+      return [];
+    }
+
+    final folders = <InstalledAddonFolder>[];
+    final entities = await addonsDir.list().toList();
+
+    for (final entity in entities) {
+      if (entity is! Directory) {
+        continue;
+      }
+
+      final folderName = p.basename(entity.path);
+      if (folderName.startsWith('Blizzard_') || folderName.startsWith('.')) {
+        continue;
+      }
+
+      final tocFiles = await _getDirectTocFiles(entity);
+      if (tocFiles.isEmpty) {
+        continue;
+      }
+
+      final metadata = await _parseAddonMetadata(tocFiles, folderName);
+      folders.add(
+        InstalledAddonFolder(
+          folderName: folderName,
+          displayName: metadata.title,
+          title: metadata.title,
+          dependencies: metadata.dependencies,
+          xPartOf: metadata.xPartOf,
+        ),
+      );
+    }
+
+    folders.sort((a, b) => a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()));
+    return folders;
+  }
+
+  Future<void> deleteAddon(GameClient client, InstalledAddonGroup group) async {
+    for (final folderName in group.installedFolders) {
+      final directory = Directory(p.join(client.path, 'Interface', 'AddOns', folderName));
+      if (await directory.exists()) {
+        try {
+          await directory.delete(recursive: true);
+        } catch (error) {
+          throw Exception('DELETE_FAILED: $error');
+        }
+      }
+    }
+  }
+
+  Future<Directory> _ensureAddonsDirectory(GameClient client) async {
+    final addonsDir = Directory(p.join(client.path, 'Interface', 'AddOns'));
+    if (!await addonsDir.exists()) {
+      await addonsDir.create(recursive: true);
+    }
+    return addonsDir;
+  }
+
+  Future<void> _extractArchive(Archive archive, String outputPath) async {
+    for (final file in archive) {
+      final sanitizedName = p.normalize(file.name.replaceAll('\\', p.separator));
+      if (sanitizedName.startsWith('..')) {
+        continue;
+      }
+
+      final filePath = p.join(outputPath, sanitizedName);
+      if (file.isFile) {
+        final outFile = File(filePath);
+        await outFile.create(recursive: true);
+        await outFile.writeAsBytes(file.content as List<int>);
+      } else {
+        await Directory(filePath).create(recursive: true);
+      }
+    }
+  }
+
+  Future<List<Directory>> _collectAddonRoots(Directory rootDir) async {
+    final addonRoots = <Directory>[];
+
+    Future<void> traverse(Directory directory) async {
+      final tocFiles = await _getDirectTocFiles(directory);
+      if (tocFiles.isNotEmpty) {
+        addonRoots.add(directory);
+        return;
+      }
+
+      final children = await directory.list().toList();
+      for (final child in children.whereType<Directory>()) {
+        final folderName = p.basename(child.path);
+        if (_shouldSkipFolder(folderName)) {
+          continue;
+        }
+        await traverse(child);
       }
     }
 
-    return addons..sort((a, b) => a.displayName.compareTo(b.displayName));
+    await traverse(rootDir);
+    return addonRoots;
   }
 
-  /// Удаление папки аддона
-  Future<void> deleteAddon(GameClient client, String folderName) async {
-    final addonPath = p.join(client.path, 'Interface', 'AddOns', folderName);
-    final directory = Directory(addonPath);
+  Future<List<File>> _getDirectTocFiles(Directory directory) async {
+    final entities = await directory.list().toList();
+    return entities
+        .whereType<File>()
+        .where((file) => file.path.toLowerCase().endsWith('.toc'))
+        .toList();
+  }
 
+  bool _shouldSkipFolder(String folderName) {
+    final lower = folderName.toLowerCase();
+    return lower == '.git' ||
+        lower == '.github' ||
+        lower == '__macosx' ||
+        lower == '.idea' ||
+        lower == '.vscode';
+  }
+
+  Future<String?> _resolveTargetFolderName(Directory root, String archiveFileName) async {
+    final tocFiles = await _getDirectTocFiles(root);
+    if (root.parent.path == root.path) {
+      return null;
+    }
+
+    final isTempRoot = p.basename(root.path).startsWith('extract_');
+    if (isTempRoot) {
+      if (tocFiles.isEmpty) {
+        return _sanitizeFolderName(_stripArchiveExtension(archiveFileName));
+      }
+
+      final matchingToc = tocFiles.firstWhere(
+        (file) {
+          final tocName = p.basenameWithoutExtension(file.path).toLowerCase();
+          final archiveName = _stripArchiveExtension(archiveFileName).toLowerCase();
+          return tocName == archiveName;
+        },
+        orElse: () => tocFiles.first,
+      );
+      return _sanitizeFolderName(p.basenameWithoutExtension(matchingToc.path));
+    }
+
+    return _sanitizeFolderName(p.basename(root.path));
+  }
+
+  Future<void> _copyAddonRoot(Directory source, Directory target) async {
+    await target.create(recursive: true);
+    await for (final entity in source.list(recursive: false)) {
+      final name = p.basename(entity.path);
+      if (_shouldSkipEntity(name)) {
+        continue;
+      }
+
+      final targetPath = p.join(target.path, name);
+      if (entity is File) {
+        await entity.copy(targetPath);
+      } else if (entity is Directory) {
+        await _copyDirectory(entity, Directory(targetPath));
+      }
+    }
+  }
+
+  Future<void> _copyDirectory(Directory source, Directory target) async {
+    await target.create(recursive: true);
+    await for (final entity in source.list(recursive: false)) {
+      final name = p.basename(entity.path);
+      if (_shouldSkipEntity(name)) {
+        continue;
+      }
+
+      final targetPath = p.join(target.path, name);
+      if (entity is File) {
+        await entity.copy(targetPath);
+      } else if (entity is Directory) {
+        await _copyDirectory(entity, Directory(targetPath));
+      }
+    }
+  }
+
+  bool _shouldSkipEntity(String name) {
+    final lower = name.toLowerCase();
+    return lower == '.ds_store' ||
+        lower == 'thumbs.db' ||
+        lower == '.gitignore' ||
+        lower == '.gitattributes' ||
+        lower == '.editorconfig' ||
+        lower == 'license' ||
+        lower == 'license.txt' ||
+        lower == 'readme' ||
+        lower == 'readme.md' ||
+        lower == 'changelog' ||
+        lower == 'changelog.md' ||
+        lower == '__macosx';
+  }
+
+  Future<_TocMetadata> _parseAddonMetadata(List<File> tocFiles, String fallback) async {
+    String displayName = fallback;
+    final dependencies = <String>[];
+    String? xPartOf;
+
+    try {
+      final preferredToc = tocFiles.firstWhere(
+        (file) => p.basename(file.path).toLowerCase() == '${fallback.toLowerCase()}.toc',
+        orElse: () => tocFiles.first,
+      );
+
+      final lines = await preferredToc.readAsLines();
+      for (final line in lines) {
+        final trimmedLine = line.trim();
+
+        if (trimmedLine.startsWith('## Title:')) {
+          final title = trimmedLine.replaceFirst('## Title:', '').trim();
+          if (title.isNotEmpty) {
+            displayName = _cleanWowTitle(title);
+          }
+          continue;
+        }
+
+        if (trimmedLine.startsWith('## RequiredDeps:')) {
+          final value = trimmedLine.replaceFirst('## RequiredDeps:', '').trim();
+          dependencies.addAll(_parseDependencies(value));
+          continue;
+        }
+
+        if (trimmedLine.startsWith('## Dependencies:')) {
+          final value = trimmedLine.replaceFirst('## Dependencies:', '').trim();
+          dependencies.addAll(_parseDependencies(value));
+          continue;
+        }
+
+        if (trimmedLine.startsWith('## X-Part-Of:')) {
+          final value = trimmedLine.replaceFirst('## X-Part-Of:', '').trim();
+          if (value.isNotEmpty) {
+            xPartOf = _cleanWowTitle(value);
+          }
+        }
+      }
+    } catch (_) {
+      return _TocMetadata(title: fallback);
+    }
+
+    return _TocMetadata(
+      title: displayName,
+      dependencies: dependencies.toSet().toList(),
+      xPartOf: xPartOf,
+    );
+  }
+
+  List<String> _parseDependencies(String rawValue) {
+    return rawValue
+        .split(',')
+        .map((dependency) => dependency.trim())
+        .where((dependency) => dependency.isNotEmpty)
+        .toList();
+  }
+
+  String _cleanWowTitle(String title) {
+    return title
+        .replaceAll(RegExp(r'\|c[0-9a-fA-F]{8}'), '')
+        .replaceAll('|r', '')
+        .trim();
+  }
+
+  String _stripArchiveExtension(String fileName) {
+    final lower = fileName.toLowerCase();
+    if (lower.endsWith('.zip')) {
+      return fileName.substring(0, fileName.length - 4);
+    }
+    return fileName;
+  }
+
+  String _sanitizeFolderName(String input) {
+    final cleaned = input
+        .replaceAll(RegExp(r'-(main|master)$', caseSensitive: false), '')
+        .replaceAll(RegExp(r'[^A-Za-z0-9_!.-]'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .trim();
+    return cleaned.isEmpty ? 'Addon' : cleaned;
+  }
+
+  Future<void> _safeDeleteDirectory(Directory directory) async {
     if (await directory.exists()) {
-      try {
-        await directory.delete(recursive: true);
-      } catch (e) {
-        throw Exception('DELETE_FAILED: $e');
-      }
-    } else {
-      throw Exception('FOLDER_NOT_FOUND');
+      await directory.delete(recursive: true);
     }
   }
+
+  Future<void> _safeDeleteFile(File file) async {
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }
+}
+
+class _TocMetadata {
+  final String title;
+  final List<String> dependencies;
+  final String? xPartOf;
+
+  const _TocMetadata({
+    required this.title,
+    this.dependencies = const <String>[],
+    this.xPartOf,
+  });
 }

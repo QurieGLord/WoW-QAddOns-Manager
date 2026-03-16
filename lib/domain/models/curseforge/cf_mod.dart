@@ -1,9 +1,5 @@
-import 'package:json_annotation/json_annotation.dart';
 import 'package:wow_qaddons_manager/domain/models/curseforge/cf_file.dart';
 
-part 'cf_mod.g.dart';
-
-@JsonSerializable()
 class CfMod {
   final int id;
   final String name;
@@ -22,39 +18,99 @@ class CfMod {
   });
 
   String? get primaryAuthor => authors.isNotEmpty ? authors.first.name : null;
-  
+
   String get latestVersion {
-    if (latestFiles.isEmpty) return 'N/A';
+    if (latestFiles.isEmpty) {
+      return 'N/A';
+    }
+
     // Берем версию из самого свежего файла
     final versions = latestFiles.first.gameVersions;
     // Ищем строку, похожую на версию (цифры с точками), исключая "Retail", "WotLK" и т.д.
     for (var v in versions) {
-      if (RegExp(r'^\d+\.').hasMatch(v)) return v;
+      if (RegExp(r'^\d+\.').hasMatch(v)) {
+        return v;
+      }
     }
     return versions.first;
   }
 
-  factory CfMod.fromJson(Map<String, dynamic> json) => _$CfModFromJson(json);
-  Map<String, dynamic> toJson() => _$CfModToJson(this);
+  factory CfMod.fromJson(Map<String, dynamic> json) {
+    return CfMod(
+      id: _readInt(json['id']),
+      name: _readString(json['name']) ?? 'Unknown CurseForge mod',
+      summary: _readString(json['summary']) ?? 'No description available',
+      logo: json['logo'] is Map ? CfLogo.fromJson(Map<String, dynamic>.from(json['logo'] as Map)) : null,
+      authors: _readObjectList(json['authors']).map(CfAuthor.fromJson).toList(growable: false),
+      latestFiles: _readObjectList(json['latestFiles']).map(CfFile.fromJson).toList(growable: false),
+    );
+  }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'id': id,
+    'name': name,
+    'summary': summary,
+    'logo': logo?.toJson(),
+    'authors': authors.map((author) => author.toJson()).toList(growable: false),
+    'latestFiles': latestFiles.map((file) => file.toJson()).toList(growable: false),
+  };
+
+  static int _readInt(Object? value) {
+    if (value is num) {
+      return value.toInt();
+    }
+    return int.tryParse('$value') ?? 0;
+  }
+
+  static String? _readString(Object? value) {
+    if (value == null) {
+      return null;
+    }
+
+    final stringValue = value.toString().trim();
+    if (stringValue.isEmpty || stringValue.toLowerCase() == 'null') {
+      return null;
+    }
+
+    return stringValue;
+  }
+
+  static List<Map<String, dynamic>> _readObjectList(Object? value) {
+    if (value is! List) {
+      return const <Map<String, dynamic>>[];
+    }
+
+    return value.whereType<Map>().map((entry) => Map<String, dynamic>.from(entry)).toList(growable: false);
+  }
 }
 
-@JsonSerializable()
 class CfAuthor {
   final int id;
   final String name;
 
   CfAuthor({required this.id, required this.name});
 
-  factory CfAuthor.fromJson(Map<String, dynamic> json) => _$CfAuthorFromJson(json);
-  Map<String, dynamic> toJson() => _$CfAuthorToJson(this);
+  factory CfAuthor.fromJson(Map<String, dynamic> json) => CfAuthor(
+    id: CfMod._readInt(json['id']),
+    name: CfMod._readString(json['name']) ?? 'Unknown',
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'id': id,
+    'name': name,
+  };
 }
 
-@JsonSerializable()
 class CfLogo {
-  final String thumbnailUrl;
+  final String? thumbnailUrl;
 
-  CfLogo({required this.thumbnailUrl});
+  CfLogo({this.thumbnailUrl});
 
-  factory CfLogo.fromJson(Map<String, dynamic> json) => _$CfLogoFromJson(json);
-  Map<String, dynamic> toJson() => _$CfLogoToJson(this);
+  factory CfLogo.fromJson(Map<String, dynamic> json) => CfLogo(
+    thumbnailUrl: CfMod._readString(json['thumbnailUrl']),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'thumbnailUrl': thumbnailUrl,
+  };
 }

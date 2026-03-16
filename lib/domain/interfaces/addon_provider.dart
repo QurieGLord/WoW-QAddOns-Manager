@@ -1,6 +1,8 @@
 import 'package:wow_qaddons_manager/domain/models/addon_item.dart';
 
 abstract class IAddonProvider {
+  String get providerName;
+
   /// Поиск аддонов по запросу и версии игры
   Future<List<AddonItem>> search(String query, String gameVersion);
 
