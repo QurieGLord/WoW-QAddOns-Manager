@@ -7,5 +7,95 @@
   "themeDark": "Dark Theme",
   "language": "Language",
   "scanTitle": "Scan for Game Clients",
-  "noClientsFound": "No WoW clients found. Please select directory manually."
+  "noClientsFound": "No WoW clients found. Please select directory manually.",
+  "clientDetailsTitle": "Client Details",
+  "clientDetailsLoadingAddons": "Loading installed addons...",
+  "clientDetailsLoadErrorTitle": "Couldn't load installed addons",
+  "clientDetailsLoadErrorMessage": "The installed addons list couldn't be loaded: {details}",
+  "@clientDetailsLoadErrorMessage": {
+    "placeholders": {
+      "details": {}
+    }
+  },
+  "searchAddonsHint": "Search addons...",
+  "discoveryFeedTitle": "Popular addons for {version}",
+  "@discoveryFeedTitle": {
+    "placeholders": {
+      "version": {}
+    }
+  },
+  "discoveryFeedSubtitle": "This is a popularity feed from CurseForge for client version {version}, not a text search result.",
+  "@discoveryFeedSubtitle": {
+    "placeholders": {
+      "version": {}
+    }
+  },
+  "discoveryFeedLoading": "Loading popular addons for {version}...",
+  "@discoveryFeedLoading": {
+    "placeholders": {
+      "version": {}
+    }
+  },
+  "discoveryFeedErrorTitle": "Couldn't load the popular addons feed",
+  "discoveryFeedErrorMessage": "Failed to load the popular addons feed for version {version}: {details}",
+  "@discoveryFeedErrorMessage": {
+    "placeholders": {
+      "version": {},
+      "details": {}
+    }
+  },
+  "discoveryFeedEmptyTitle": "No popular addons available",
+  "discoveryFeedEmptyMessage": "CurseForge didn't return a popular addons feed for client version {version}.",
+  "@discoveryFeedEmptyMessage": {
+    "placeholders": {
+      "version": {}
+    }
+  },
+  "searchResultsTitle": "Results for \"{query}\"",
+  "@searchResultsTitle": {
+    "placeholders": {
+      "query": {}
+    }
+  },
+  "searchResultsSubtitle": "Search results compatible with client version {version}.",
+  "@searchResultsSubtitle": {
+    "placeholders": {
+      "version": {}
+    }
+  },
+  "searchLoading": "Searching for \"{query}\"...",
+  "@searchLoading": {
+    "placeholders": {
+      "query": {}
+    }
+  },
+  "searchErrorTitle": "Search failed",
+  "searchErrorMessage": "The search request failed: {details}",
+  "@searchErrorMessage": {
+    "placeholders": {
+      "details": {}
+    }
+  },
+  "searchNoResultsTitle": "Nothing found",
+  "searchNoResultsMessage": "No addons found for \"{query}\" for client version {version}.",
+  "@searchNoResultsMessage": {
+    "placeholders": {
+      "query": {},
+      "version": {}
+    }
+  },
+  "retryButton": "Retry",
+  "addonAuthorLabel": "By {author}",
+  "@addonAuthorLabel": {
+    "placeholders": {
+      "author": {}
+    }
+  },
+  "addonVersionLabel": "Ver: {version}",
+  "@addonVersionLabel": {
+    "placeholders": {
+      "version": {}
+    }
+  },
+  "addonNoDescription": "No description available"
 }

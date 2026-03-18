@@ -145,6 +145,144 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No WoW clients found. Please select directory manually.'**
   String get noClientsFound;
+
+  /// No description provided for @clientDetailsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Client Details'**
+  String get clientDetailsTitle;
+
+  /// No description provided for @clientDetailsLoadingAddons.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading installed addons...'**
+  String get clientDetailsLoadingAddons;
+
+  /// No description provided for @clientDetailsLoadErrorTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load installed addons'**
+  String get clientDetailsLoadErrorTitle;
+
+  /// No description provided for @clientDetailsLoadErrorMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'The installed addons list couldn\'t be loaded: {details}'**
+  String clientDetailsLoadErrorMessage(Object details);
+
+  /// No description provided for @searchAddonsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search addons...'**
+  String get searchAddonsHint;
+
+  /// No description provided for @discoveryFeedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Popular addons for {version}'**
+  String discoveryFeedTitle(Object version);
+
+  /// No description provided for @discoveryFeedSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'This is a popularity feed from CurseForge for client version {version}, not a text search result.'**
+  String discoveryFeedSubtitle(Object version);
+
+  /// No description provided for @discoveryFeedLoading.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading popular addons for {version}...'**
+  String discoveryFeedLoading(Object version);
+
+  /// No description provided for @discoveryFeedErrorTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load the popular addons feed'**
+  String get discoveryFeedErrorTitle;
+
+  /// No description provided for @discoveryFeedErrorMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to load the popular addons feed for version {version}: {details}'**
+  String discoveryFeedErrorMessage(Object version, Object details);
+
+  /// No description provided for @discoveryFeedEmptyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'No popular addons available'**
+  String get discoveryFeedEmptyTitle;
+
+  /// No description provided for @discoveryFeedEmptyMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'CurseForge didn\'t return a popular addons feed for client version {version}.'**
+  String discoveryFeedEmptyMessage(Object version);
+
+  /// No description provided for @searchResultsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Results for \"{query}\"'**
+  String searchResultsTitle(Object query);
+
+  /// No description provided for @searchResultsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Search results compatible with client version {version}.'**
+  String searchResultsSubtitle(Object version);
+
+  /// No description provided for @searchLoading.
+  ///
+  /// In en, this message translates to:
+  /// **'Searching for \"{query}\"...'**
+  String searchLoading(Object query);
+
+  /// No description provided for @searchErrorTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Search failed'**
+  String get searchErrorTitle;
+
+  /// No description provided for @searchErrorMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'The search request failed: {details}'**
+  String searchErrorMessage(Object details);
+
+  /// No description provided for @searchNoResultsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing found'**
+  String get searchNoResultsTitle;
+
+  /// No description provided for @searchNoResultsMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'No addons found for \"{query}\" for client version {version}.'**
+  String searchNoResultsMessage(Object query, Object version);
+
+  /// No description provided for @retryButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get retryButton;
+
+  /// No description provided for @addonAuthorLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'By {author}'**
+  String addonAuthorLabel(Object author);
+
+  /// No description provided for @addonVersionLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Ver: {version}'**
+  String addonVersionLabel(Object version);
+
+  /// No description provided for @addonNoDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'No description available'**
+  String get addonNoDescription;
 }
 
 class _AppLocalizationsDelegate

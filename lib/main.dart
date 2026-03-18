@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:wow_qaddons_manager/core/l10n/app_localizations.dart';
 import 'package:wow_qaddons_manager/core/theme/app_theme.dart';
 import 'package:wow_qaddons_manager/shared/widgets/app_logo_widget.dart';
 import 'package:wow_qaddons_manager/data/services/wow_scanner_service.dart';
@@ -27,21 +27,22 @@ final curseForgeClientProvider = Provider((ref) => CurseForgeClient());
 
 final addonSearchServiceProvider = Provider((ref) {
   final cfClient = ref.read(curseForgeClientProvider);
-  return AddonSearchService([
-    CurseForgeProvider(cfClient),
-    GitHubProvider(),
-  ]);
+  return AddonSearchService([CurseForgeProvider(cfClient), GitHubProvider()]);
 });
 
-final addonInstallerServiceProvider = Provider((ref) => AddonInstallerService());
+final addonInstallerServiceProvider = Provider(
+  (ref) => AddonInstallerService(),
+);
 final addonRegistryServiceProvider = Provider((ref) => AddonRegistryService());
 
 // Состояние установленных аддонов
-class LocalAddonsNotifier extends StateNotifier<AsyncValue<List<InstalledAddonGroup>>> {
+class LocalAddonsNotifier
+    extends StateNotifier<AsyncValue<List<InstalledAddonGroup>>> {
   final AddonInstallerService _installer;
   final AddonRegistryService _registry;
   final GameClient _client;
-  LocalAddonsNotifier(this._installer, this._registry, this._client) : super(const AsyncValue.loading()) {
+  LocalAddonsNotifier(this._installer, this._registry, this._client)
+    : super(const AsyncValue.loading()) {
     refresh();
   }
 
@@ -56,7 +57,10 @@ class LocalAddonsNotifier extends StateNotifier<AsyncValue<List<InstalledAddonGr
     }
   }
 
-  Future<void> registerInstalledAddon(AddonItem addon, List<String> installedFolders) async {
+  Future<void> registerInstalledAddon(
+    AddonItem addon,
+    List<String> installedFolders,
+  ) async {
     try {
       await _registry.registerInstallation(
         _client,
@@ -95,13 +99,18 @@ class LocalAddonsNotifier extends StateNotifier<AsyncValue<List<InstalledAddonGr
   }
 }
 
-final localAddonsProvider = StateNotifierProvider.family<LocalAddonsNotifier, AsyncValue<List<InstalledAddonGroup>>, GameClient>((ref, client) {
-  return LocalAddonsNotifier(
-    ref.read(addonInstallerServiceProvider),
-    ref.read(addonRegistryServiceProvider),
-    client,
-  );
-});
+final localAddonsProvider =
+    StateNotifierProvider.family<
+      LocalAddonsNotifier,
+      AsyncValue<List<InstalledAddonGroup>>,
+      GameClient
+    >((ref, client) {
+      return LocalAddonsNotifier(
+        ref.read(addonInstallerServiceProvider),
+        ref.read(addonRegistryServiceProvider),
+        client,
+      );
+    });
 
 // Состояние поиска аддонов
 class SearchResultsNotifier extends StateNotifier<AsyncValue<List<AddonItem>>> {
@@ -124,9 +133,74 @@ class SearchResultsNotifier extends StateNotifier<AsyncValue<List<AddonItem>>> {
   }
 }
 
-final searchResultsProvider = StateNotifierProvider<SearchResultsNotifier, AsyncValue<List<AddonItem>>>((ref) {
-  return SearchResultsNotifier(ref.read(addonSearchServiceProvider));
-});
+class _ClientSearchScopeKey {
+  final String clientId;
+  final String gameVersion;
+
+  const _ClientSearchScopeKey({
+    required this.clientId,
+    required this.gameVersion,
+  });
+
+  @override
+  bool operator ==(Object other) {
+    return other is _ClientSearchScopeKey &&
+        other.clientId == clientId &&
+        other.gameVersion == gameVersion;
+  }
+
+  @override
+  int get hashCode => Object.hash(clientId, gameVersion);
+}
+
+class DiscoveryFeedNotifier extends StateNotifier<AsyncValue<List<AddonItem>>> {
+  final AddonSearchService _searchService;
+  final String _gameVersion;
+
+  DiscoveryFeedNotifier(this._searchService, this._gameVersion)
+    : super(const AsyncValue.loading()) {
+    load();
+  }
+
+  Future<void> load() async {
+    if (_gameVersion.trim().isEmpty) {
+      state = const AsyncValue.data([]);
+      return;
+    }
+
+    state = const AsyncValue.loading();
+    try {
+      final results = await _searchService.fetchDiscoveryFeed(
+        _gameVersion,
+        limit: 50,
+      );
+      state = AsyncValue.data(results);
+    } catch (e, s) {
+      state = AsyncValue.error(e, s);
+    }
+  }
+}
+
+final searchResultsProvider = StateNotifierProvider.autoDispose
+    .family<
+      SearchResultsNotifier,
+      AsyncValue<List<AddonItem>>,
+      _ClientSearchScopeKey
+    >((ref, key) {
+      return SearchResultsNotifier(ref.read(addonSearchServiceProvider));
+    });
+
+final discoveryFeedProvider = StateNotifierProvider.autoDispose
+    .family<
+      DiscoveryFeedNotifier,
+      AsyncValue<List<AddonItem>>,
+      _ClientSearchScopeKey
+    >((ref, key) {
+      return DiscoveryFeedNotifier(
+        ref.read(addonSearchServiceProvider),
+        key.gameVersion,
+      );
+    });
 
 class ClientListNotifier extends StateNotifier<List<GameClient>> {
   final ClientRepository _repository;
@@ -149,71 +223,115 @@ class ClientListNotifier extends StateNotifier<List<GameClient>> {
   }
 }
 
-final clientListProvider = StateNotifierProvider<ClientListNotifier, List<GameClient>>((ref) {
-  return ClientListNotifier(ref.read(clientRepositoryProvider));
-});
+final clientListProvider =
+    StateNotifierProvider<ClientListNotifier, List<GameClient>>((ref) {
+      return ClientListNotifier(ref.read(clientRepositoryProvider));
+    });
 
 // SVG Assets
 class AppVectors {
-  static const String interface = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19 3H5C3.89 3 3 3.9 3 5V19C3 20.1 3.89 21 5 21H19C20.11 21 21 20.1 21 19V5C21 3.9 20.11 3 19 3ZM19 19H5V5H19V19ZM7 10H17V12H7V10ZM7 14H12V16H7V14ZM7 6H17V8H7V6Z" fill="currentColor"/></svg>';
-  static const String wow = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 6H3C1.9 6 1 6.9 1 8V18C1 19.1 1.9 20 3 20H21C22.1 20 23 19.1 23 18V8C23 6.9 22.1 6 21 6ZM21 18H3V8H21V18ZM6 15H8V17H6V15ZM10 15H12V17H10V15ZM14 15H16V17H14V15ZM18 15H20V17H18V15ZM6 11H8V13H6V11ZM10 11H12V13H10V11ZM14 11H16V13H14V11ZM18 11H20V13H18V11Z" fill="currentColor"/></svg>';
-  static const String downloads = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19 9H15V3H9V9H5L12 16L19 9ZM5 18V20H19V18H5Z" fill="currentColor"/></svg>';
-  static const String info = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 12 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM13 17H11V11H13V17ZM13 9H11V7H13V9Z" fill="currentColor"/></svg>';
+  static const String interface =
+      '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19 3H5C3.89 3 3 3.9 3 5V19C3 20.1 3.89 21 5 21H19C20.11 21 21 20.1 21 19V5C21 3.9 20.11 3 19 3ZM19 19H5V5H19V19ZM7 10H17V12H7V10ZM7 14H12V16H7V14ZM7 6H17V8H7V6Z" fill="currentColor"/></svg>';
+  static const String wow =
+      '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 6H3C1.9 6 1 6.9 1 8V18C1 19.1 1.9 20 3 20H21C22.1 20 23 19.1 23 18V8C23 6.9 22.1 6 21 6ZM21 18H3V8H21V18ZM6 15H8V17H6V15ZM10 15H12V17H10V15ZM14 15H16V17H14V15ZM18 15H20V17H18V15ZM6 11H8V13H6V11ZM10 11H12V13H10V11ZM14 11H16V13H14V11ZM18 11H20V13H18V11Z" fill="currentColor"/></svg>';
+  static const String downloads =
+      '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19 9H15V3H9V9H5L12 16L19 9ZM5 18V20H19V18H5Z" fill="currentColor"/></svg>';
+  static const String info =
+      '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 12 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM13 17H11V11H13V17ZM13 9H11V7H13V9Z" fill="currentColor"/></svg>';
 }
 
 // Localization Stub
 class AppLocalizationsStub {
-  static String appTitle(String locale) => locale == 'ru' ? 'WoW QAddOns Менеджер' : 'WoW QAddOns Manager';
-  static String homeTitle(String locale) => locale == 'ru' ? 'Клиенты WoW' : 'WoW Clients';
-  static String settingsTitle(String locale) => locale == 'ru' ? 'Настройки' : 'Settings';
-  static String interfaceSection(String locale) => locale == 'ru' ? 'Интерфейс' : 'Interface';
-  static String languageSection(String locale) => locale == 'ru' ? 'Язык' : 'Language';
-  static String themeModeLabel(String locale) => locale == 'ru' ? 'Тема оформления' : 'Theme Mode';
-  static String colorSchemeLabel(String locale) => locale == 'ru' ? 'Цветовая схема' : 'Color Scheme';
-  static String wowClientsSection(String locale) => locale == 'ru' ? 'Клиенты WoW' : 'WoW Clients';
-  static String downloadsSection(String locale) => locale == 'ru' ? 'Загрузки' : 'Downloads';
-  static String aboutSection(String locale) => locale == 'ru' ? 'О приложении' : 'About';
-  static String versionLabel(String locale) => locale == 'ru' ? 'Версия' : 'Version';
-  static String developerLabel(String locale) => locale == 'ru' ? 'Разработчик' : 'Developer';
-  static String descriptionLabel(String locale) => locale == 'ru' ? 'Управляйте своими аддонами' : 'Manage your addons';
-  static String scanFailed(String locale) => locale == 'ru' ? 'Клиент WoW не найден' : 'WoW client not found';
+  static String appTitle(String locale) =>
+      locale == 'ru' ? 'WoW QAddOns Менеджер' : 'WoW QAddOns Manager';
+  static String homeTitle(String locale) =>
+      locale == 'ru' ? 'Клиенты WoW' : 'WoW Clients';
+  static String settingsTitle(String locale) =>
+      locale == 'ru' ? 'Настройки' : 'Settings';
+  static String interfaceSection(String locale) =>
+      locale == 'ru' ? 'Интерфейс' : 'Interface';
+  static String languageSection(String locale) =>
+      locale == 'ru' ? 'Язык' : 'Language';
+  static String themeModeLabel(String locale) =>
+      locale == 'ru' ? 'Тема оформления' : 'Theme Mode';
+  static String colorSchemeLabel(String locale) =>
+      locale == 'ru' ? 'Цветовая схема' : 'Color Scheme';
+  static String wowClientsSection(String locale) =>
+      locale == 'ru' ? 'Клиенты WoW' : 'WoW Clients';
+  static String downloadsSection(String locale) =>
+      locale == 'ru' ? 'Загрузки' : 'Downloads';
+  static String aboutSection(String locale) =>
+      locale == 'ru' ? 'О приложении' : 'About';
+  static String versionLabel(String locale) =>
+      locale == 'ru' ? 'Версия' : 'Version';
+  static String developerLabel(String locale) =>
+      locale == 'ru' ? 'Разработчик' : 'Developer';
+  static String descriptionLabel(String locale) =>
+      locale == 'ru' ? 'Управляйте своими аддонами' : 'Manage your addons';
+  static String scanFailed(String locale) =>
+      locale == 'ru' ? 'Клиент WoW не найден' : 'WoW client not found';
 
-  static String missingDataFolder(String locale) => 
-    locale == 'ru' ? 'В папке отсутствует директория "Data"' : 'Folder "Data" is missing';
-  static String missingExeFile(String locale) => 
-    locale == 'ru' ? 'Исполняемый файл (.exe) не найден' : 'Executable file (.exe) not found';
-  static String selectVersionTitle(String locale) => 
-    locale == 'ru' ? 'Выберите версию игры' : 'Select Game Version';
+  static String missingDataFolder(String locale) => locale == 'ru'
+      ? 'В папке отсутствует директория "Data"'
+      : 'Folder "Data" is missing';
+  static String missingExeFile(String locale) => locale == 'ru'
+      ? 'Исполняемый файл (.exe) не найден'
+      : 'Executable file (.exe) not found';
+  static String selectVersionTitle(String locale) =>
+      locale == 'ru' ? 'Выберите версию игры' : 'Select Game Version';
 
-  static String scanSuccess(String locale, String ver) => locale == 'ru' ? 'Добавлен: $ver' : 'Added: $ver';
-  static String manageAddons(String locale) => locale == 'ru' ? 'Управление аддонами' : 'Manage Addons';
-  static String emptyClients(String locale) => locale == 'ru' ? 'Список клиентов пуст' : 'No clients found';
-  static String searchAddons(String locale) => locale == 'ru' ? 'Поиск аддонов...' : 'Search addons...';
-  static String installing(String locale) => locale == 'ru' ? 'Установка...' : 'Installing...';
-  static String install(String locale) => locale == 'ru' ? 'Установить' : 'Install';
-  static String versionNotFound(String locale, String version) =>
-    locale == 'ru'
+  static String scanSuccess(String locale, String ver) =>
+      locale == 'ru' ? 'Добавлен: $ver' : 'Added: $ver';
+  static String manageAddons(String locale) =>
+      locale == 'ru' ? 'Управление аддонами' : 'Manage Addons';
+  static String emptyClients(String locale) =>
+      locale == 'ru' ? 'Список клиентов пуст' : 'No clients found';
+  static String searchAddons(String locale) =>
+      locale == 'ru' ? 'Поиск аддонов...' : 'Search addons...';
+  static String installing(String locale) =>
+      locale == 'ru' ? 'Установка...' : 'Installing...';
+  static String install(String locale) =>
+      locale == 'ru' ? 'Установить' : 'Install';
+  static String versionNotFound(String locale, String version) => locale == 'ru'
       ? 'Файл не найден для версии $version (или совместимой)'
       : 'No file found for version $version (or compatible)';
-  static String installSuccess(String locale) => locale == 'ru' ? 'Аддон успешно установлен' : 'Addon installed successfully';
-  static String installError(String locale) => locale == 'ru' ? 'Ошибка' : 'Error';
-  static String myAddons(String locale) => locale == 'ru' ? 'Мои аддоны' : 'My Addons';
+  static String installSuccess(String locale) => locale == 'ru'
+      ? 'Аддон успешно установлен'
+      : 'Addon installed successfully';
+  static String installError(String locale) =>
+      locale == 'ru' ? 'Ошибка' : 'Error';
+  static String myAddons(String locale) =>
+      locale == 'ru' ? 'Мои аддоны' : 'My Addons';
   static String delete(String locale) => locale == 'ru' ? 'Удалить' : 'Delete';
-  static String confirmDeleteTitle(String locale) => locale == 'ru' ? 'Удалить аддон?' : 'Delete addon?';
-  static String confirmDeleteMessage(String locale, String name) => locale == 'ru' ? 'Вы уверены, что хотите удалить $name?' : 'Are you sure you want to delete $name?';
+  static String confirmDeleteTitle(String locale) =>
+      locale == 'ru' ? 'Удалить аддон?' : 'Delete addon?';
+  static String confirmDeleteMessage(String locale, String name) =>
+      locale == 'ru'
+      ? 'Вы уверены, что хотите удалить $name?'
+      : 'Are you sure you want to delete $name?';
   static String cancel(String locale) => locale == 'ru' ? 'Отмена' : 'Cancel';
-  static String noLocalAddons(String locale) => locale == 'ru' ? 'Установленные аддоны не найдены' : 'No installed addons found';
-  static String scanAddons(String locale) => locale == 'ru' ? 'Сканировать' : 'Scan';
-  static String refreshAddons(String locale) => locale == 'ru' ? 'Обновить список' : 'Refresh list';
-  static String deleteSelected(String locale) => locale == 'ru' ? 'Удалить выбранные' : 'Delete selected';
-  static String selectedCount(String locale, int count) => locale == 'ru' ? 'Выбрано: $count' : 'Selected: $count';
-  static String addonFolders(String locale, int count) => locale == 'ru' ? 'Папок: $count' : 'Folders: $count';
-  static String localManual(String locale) => locale == 'ru' ? 'Вручную' : 'Manual';
-  static String clearSelection(String locale) => locale == 'ru' ? 'Снять выбор' : 'Clear selection';
+  static String noLocalAddons(String locale) => locale == 'ru'
+      ? 'Установленные аддоны не найдены'
+      : 'No installed addons found';
+  static String scanAddons(String locale) =>
+      locale == 'ru' ? 'Сканировать' : 'Scan';
+  static String refreshAddons(String locale) =>
+      locale == 'ru' ? 'Обновить список' : 'Refresh list';
+  static String deleteSelected(String locale) =>
+      locale == 'ru' ? 'Удалить выбранные' : 'Delete selected';
+  static String selectedCount(String locale, int count) =>
+      locale == 'ru' ? 'Выбрано: $count' : 'Selected: $count';
+  static String addonFolders(String locale, int count) =>
+      locale == 'ru' ? 'Папок: $count' : 'Folders: $count';
+  static String localManual(String locale) =>
+      locale == 'ru' ? 'Вручную' : 'Manual';
+  static String clearSelection(String locale) =>
+      locale == 'ru' ? 'Снять выбор' : 'Clear selection';
 }
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   try {
     await dotenv.load(fileName: ".env");
   } catch (e) {
@@ -221,17 +339,19 @@ Future<void> main() async {
   }
 
   final sharedPrefs = await SharedPreferences.getInstance();
-  
-  runApp(ProviderScope(
-    overrides: [
-      sharedPrefsProvider.overrideWithValue(sharedPrefs),
-    ],
-    child: const MyApp(),
-  ));
+
+  runApp(
+    ProviderScope(
+      overrides: [sharedPrefsProvider.overrideWithValue(sharedPrefs)],
+      child: const MyApp(),
+    ),
+  );
 }
 
 // Провайдер для SharedPreferences
-final sharedPrefsProvider = Provider<SharedPreferences>((ref) => throw UnimplementedError());
+final sharedPrefsProvider = Provider<SharedPreferences>(
+  (ref) => throw UnimplementedError(),
+);
 
 // App Theme State
 class AppSettingsState {
@@ -239,9 +359,17 @@ class AppSettingsState {
   final Locale locale;
   final Color seedColor;
 
-  AppSettingsState({required this.themeMode, required this.locale, required this.seedColor});
+  AppSettingsState({
+    required this.themeMode,
+    required this.locale,
+    required this.seedColor,
+  });
 
-  AppSettingsState copyWith({ThemeMode? themeMode, Locale? locale, Color? seedColor}) {
+  AppSettingsState copyWith({
+    ThemeMode? themeMode,
+    Locale? locale,
+    Color? seedColor,
+  }) {
     return AppSettingsState(
       themeMode: themeMode ?? this.themeMode,
       locale: locale ?? this.locale,
@@ -253,11 +381,15 @@ class AppSettingsState {
 class AppSettingsNotifier extends StateNotifier<AppSettingsState> {
   final SharedPreferences _prefs;
 
-  AppSettingsNotifier(this._prefs) : super(AppSettingsState(
-    themeMode: ThemeMode.values[_prefs.getInt('themeMode') ?? ThemeMode.system.index],
-    locale: Locale(_prefs.getString('locale') ?? 'en'),
-    seedColor: Color(_prefs.getInt('seedColor') ?? 0xFF6750A4),
-  ));
+  AppSettingsNotifier(this._prefs)
+    : super(
+        AppSettingsState(
+          themeMode: ThemeMode
+              .values[_prefs.getInt('themeMode') ?? ThemeMode.system.index],
+          locale: Locale(_prefs.getString('locale') ?? 'en'),
+          seedColor: Color(_prefs.getInt('seedColor') ?? 0xFF6750A4),
+        ),
+      );
 
   void setThemeMode(ThemeMode mode) {
     state = state.copyWith(themeMode: mode);
@@ -275,9 +407,10 @@ class AppSettingsNotifier extends StateNotifier<AppSettingsState> {
   }
 }
 
-final appSettingsProvider = StateNotifierProvider<AppSettingsNotifier, AppSettingsState>((ref) {
-  return AppSettingsNotifier(ref.watch(sharedPrefsProvider));
-});
+final appSettingsProvider =
+    StateNotifierProvider<AppSettingsNotifier, AppSettingsState>((ref) {
+      return AppSettingsNotifier(ref.watch(sharedPrefsProvider));
+    });
 
 class MyApp extends ConsumerWidget {
   const MyApp({super.key});
@@ -292,12 +425,8 @@ class MyApp extends ConsumerWidget {
       themeMode: settings.themeMode,
       theme: AppTheme.createTheme(Brightness.light, settings.seedColor),
       darkTheme: AppTheme.createTheme(Brightness.dark, settings.seedColor),
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      supportedLocales: const [Locale('en'), Locale('ru')],
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       locale: settings.locale,
       home: const HomeScreen(),
     );
@@ -307,24 +436,30 @@ class MyApp extends ConsumerWidget {
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
-  Future<void> _handleScan(BuildContext context, WidgetRef ref, String locale) async {
+  Future<void> _handleScan(
+    BuildContext context,
+    WidgetRef ref,
+    String locale,
+  ) async {
     final String? directoryPath = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: locale == 'ru' ? 'Выберите папку с World of Warcraft' : 'Select World of Warcraft folder',
+      dialogTitle: locale == 'ru'
+          ? 'Выберите папку с World of Warcraft'
+          : 'Select World of Warcraft folder',
     );
 
     if (directoryPath == null) return;
 
     final scanner = ref.read(scannerServiceProvider);
-    
+
     List<GameClient> clients;
     try {
       clients = await scanner.scanDirectory(directoryPath);
     } catch (e) {
       if (!context.mounted) return;
-      
+
       String errorMsg = AppLocalizationsStub.scanFailed(locale);
       final eStr = e.toString();
-      
+
       if (eStr.contains('MISSING_DATA')) {
         errorMsg = AppLocalizationsStub.missingDataFolder(locale);
       } else if (eStr.contains('MISSING_EXE')) {
@@ -361,7 +496,9 @@ class HomeScreen extends ConsumerWidget {
       selectedClient = await showDialog<GameClient>(
         context: context,
         builder: (context) => AlertDialog(
-          title: Text(locale == 'ru' ? 'Выберите файл запуска' : 'Select executable'),
+          title: Text(
+            locale == 'ru' ? 'Выберите файл запуска' : 'Select executable',
+          ),
           content: SizedBox(
             width: double.maxFinite,
             child: ListView.builder(
@@ -387,7 +524,9 @@ class HomeScreen extends ConsumerWidget {
       );
 
       if (manualVersion != null) {
-        selectedClient = selectedClient.copyWith(displayName: 'World of Warcraft $manualVersion');
+        selectedClient = selectedClient.copyWith(
+          displayName: 'World of Warcraft $manualVersion',
+        );
         selectedClient = GameClient(
           id: selectedClient.id,
           path: selectedClient.path,
@@ -406,7 +545,9 @@ class HomeScreen extends ConsumerWidget {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(AppLocalizationsStub.scanSuccess(locale, selectedClient.version)),
+        content: Text(
+          AppLocalizationsStub.scanSuccess(locale, selectedClient.version),
+        ),
         backgroundColor: Theme.of(context).colorScheme.primary,
         behavior: SnackBarBehavior.floating,
       ),
@@ -428,8 +569,11 @@ class HomeScreen extends ConsumerWidget {
             onPressed: () => Navigator.push(
               context,
               PageRouteBuilder(
-                pageBuilder: (context, animation, secondaryAnimation) => const SettingsScreen(),
-                transitionsBuilder: (context, animation, secondaryAnimation, child) => FadeTransition(opacity: animation, child: child),
+                pageBuilder: (context, animation, secondaryAnimation) =>
+                    const SettingsScreen(),
+                transitionsBuilder:
+                    (context, animation, secondaryAnimation, child) =>
+                        FadeTransition(opacity: animation, child: child),
               ),
             ),
           ),
@@ -443,7 +587,10 @@ class HomeScreen extends ConsumerWidget {
                 children: [
                   const AppLogoWidget(size: 160),
                   const SizedBox(height: 32),
-                  Text(AppLocalizationsStub.emptyClients(locale), style: Theme.of(context).textTheme.titleLarge),
+                  Text(
+                    AppLocalizationsStub.emptyClients(locale),
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                 ],
               ),
             )
@@ -456,7 +603,8 @@ class HomeScreen extends ConsumerWidget {
                 mainAxisSpacing: 24,
               ),
               itemCount: clients.length,
-              itemBuilder: (context, index) => _ClientCard(client: clients[index]),
+              itemBuilder: (context, index) =>
+                  _ClientCard(client: clients[index]),
             ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _handleScan(context, ref, locale),
@@ -474,7 +622,17 @@ class _VersionSelectionDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final versions = [
-      '1.12.1', '2.4.3', '3.3.5', '4.3.4', '5.4.8', '6.2.4', '7.3.5', '8.3.7', '9.2.7', '10.2.7', '11.0.0'
+      '1.12.1',
+      '2.4.3',
+      '3.3.5',
+      '4.3.4',
+      '5.4.8',
+      '6.2.4',
+      '7.3.5',
+      '8.3.7',
+      '9.2.7',
+      '10.2.7',
+      '11.0.0',
     ];
 
     return AlertDialog(
@@ -522,7 +680,9 @@ class _ClientCard extends ConsumerWidget {
       child: InkWell(
         onTap: () => Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => ClientDetailsScreen(client: client)),
+          MaterialPageRoute(
+            builder: (context) => ClientDetailsScreen(client: client),
+          ),
         ),
         borderRadius: BorderRadius.circular(28),
         child: Padding(
@@ -534,7 +694,10 @@ class _ClientCard extends ConsumerWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: colorScheme.tertiaryContainer,
                       borderRadius: BorderRadius.circular(12),
@@ -560,14 +723,18 @@ class _ClientCard extends ConsumerWidget {
               const Spacer(),
               Text(
                 client.displayName ?? 'World of Warcraft',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 4),
               Text(
                 client.path,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -575,13 +742,17 @@ class _ClientCard extends ConsumerWidget {
               FilledButton(
                 onPressed: () => Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => ClientDetailsScreen(client: client)),
+                  MaterialPageRoute(
+                    builder: (context) => ClientDetailsScreen(client: client),
+                  ),
                 ),
                 style: FilledButton.styleFrom(
                   backgroundColor: colorScheme.primary,
                   foregroundColor: colorScheme.onPrimary,
                   minimumSize: const Size(double.infinity, 44),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                 ),
                 child: Text(AppLocalizationsStub.manageAddons(locale)),
               ),
@@ -598,12 +769,14 @@ class ClientDetailsScreen extends ConsumerStatefulWidget {
   const ClientDetailsScreen({super.key, required this.client});
 
   @override
-  ConsumerState<ClientDetailsScreen> createState() => _ClientDetailsScreenState();
+  ConsumerState<ClientDetailsScreen> createState() =>
+      _ClientDetailsScreenState();
 }
 
 class _ClientDetailsScreenState extends ConsumerState<ClientDetailsScreen> {
   final PageController _pageController = PageController();
-  final GlobalKey<_LocalAddonsViewState> _localAddonsKey = GlobalKey<_LocalAddonsViewState>();
+  final GlobalKey<_LocalAddonsViewState> _localAddonsKey =
+      GlobalKey<_LocalAddonsViewState>();
   int _currentIndex = 0;
   int _selectedLocalAddons = 0;
 
@@ -625,6 +798,7 @@ class _ClientDetailsScreenState extends ConsumerState<ClientDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     final locale = ref.watch(appSettingsProvider).locale.languageCode;
+    final l10n = AppLocalizations.of(context)!;
     final isSelectionMode = _currentIndex == 0 && _selectedLocalAddons > 0;
 
     return Scaffold(
@@ -632,14 +806,15 @@ class _ClientDetailsScreenState extends ConsumerState<ClientDetailsScreen> {
         title: Text(
           isSelectionMode
               ? AppLocalizationsStub.selectedCount(locale, _selectedLocalAddons)
-              : (widget.client.displayName ?? 'Client Details'),
+              : (widget.client.displayName ?? l10n.clientDetailsTitle),
         ),
         actions: [
           if (isSelectionMode) ...[
             IconButton(
               tooltip: AppLocalizationsStub.deleteSelected(locale),
               icon: const Icon(Icons.delete_sweep_rounded),
-              onPressed: () => _localAddonsKey.currentState?.deleteSelectedFromAppBar(),
+              onPressed: () =>
+                  _localAddonsKey.currentState?.deleteSelectedFromAppBar(),
             ),
             IconButton(
               tooltip: AppLocalizationsStub.clearSelection(locale),
@@ -650,7 +825,9 @@ class _ClientDetailsScreenState extends ConsumerState<ClientDetailsScreen> {
             IconButton(
               icon: const Icon(Icons.delete_outline_rounded),
               onPressed: () async {
-                await ref.read(clientListProvider.notifier).removeClient(widget.client.id);
+                await ref
+                    .read(clientListProvider.notifier)
+                    .removeClient(widget.client.id);
                 if (context.mounted) Navigator.pop(context);
               },
             ),
@@ -706,7 +883,9 @@ class _ClientDetailsNavBar extends StatelessWidget {
         decoration: BoxDecoration(
           color: colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(44),
-          border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.1)),
+          border: Border.all(
+            color: colorScheme.outlineVariant.withValues(alpha: 0.1),
+          ),
           boxShadow: [
             BoxShadow(
               color: colorScheme.shadow.withValues(alpha: 0.1),
@@ -768,7 +947,9 @@ class _DetailsNavItem extends StatelessWidget {
             child: Center(
               child: Icon(
                 icon,
-                color: isSelected ? colorScheme.onPrimary : colorScheme.onSurfaceVariant,
+                color: isSelected
+                    ? colorScheme.onPrimary
+                    : colorScheme.onSurfaceVariant,
                 size: 24,
               ),
             ),
@@ -809,8 +990,12 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
 
   Future<void> deleteSelectedFromAppBar() async {
     final locale = ref.read(appSettingsProvider).locale.languageCode;
-    final groups = ref.read(localAddonsProvider(widget.client)).valueOrNull ?? const <InstalledAddonGroup>[];
-    final selectedGroups = groups.where((group) => _selectedIds.contains(group.id)).toList();
+    final groups =
+        ref.read(localAddonsProvider(widget.client)).valueOrNull ??
+        const <InstalledAddonGroup>[];
+    final selectedGroups = groups
+        .where((group) => _selectedIds.contains(group.id))
+        .toList();
     if (selectedGroups.isEmpty) {
       clearSelection();
       return;
@@ -819,7 +1004,10 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
     await _handleDeleteGroups(selectedGroups, locale);
   }
 
-  Future<void> _handleDeleteGroups(List<InstalledAddonGroup> groups, String locale) async {
+  Future<void> _handleDeleteGroups(
+    List<InstalledAddonGroup> groups,
+    String locale,
+  ) async {
     final theme = Theme.of(context);
     final displayName = groups.length == 1
         ? groups.first.displayName
@@ -829,7 +1017,9 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(AppLocalizationsStub.confirmDeleteTitle(locale)),
-        content: Text(AppLocalizationsStub.confirmDeleteMessage(locale, displayName)),
+        content: Text(
+          AppLocalizationsStub.confirmDeleteMessage(locale, displayName),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -853,9 +1043,13 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
 
     try {
       if (groups.length == 1) {
-        await ref.read(localAddonsProvider(widget.client).notifier).deleteAddon(groups.first);
+        await ref
+            .read(localAddonsProvider(widget.client).notifier)
+            .deleteAddon(groups.first);
       } else {
-        await ref.read(localAddonsProvider(widget.client).notifier).deleteAddons(groups);
+        await ref
+            .read(localAddonsProvider(widget.client).notifier)
+            .deleteAddons(groups);
       }
 
       clearSelection();
@@ -913,17 +1107,27 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         decoration: BoxDecoration(
-          color: isSelectionMode ? colorScheme.primaryContainer : colorScheme.surfaceContainerLow,
+          color: isSelectionMode
+              ? colorScheme.primaryContainer
+              : colorScheme.surfaceContainerLow,
           borderRadius: BorderRadius.circular(24),
           border: Border.all(
-            color: (isSelectionMode ? colorScheme.primary : colorScheme.outlineVariant).withValues(alpha: 0.25),
+            color:
+                (isSelectionMode
+                        ? colorScheme.primary
+                        : colorScheme.outlineVariant)
+                    .withValues(alpha: 0.25),
           ),
         ),
         child: Row(
           children: [
             Icon(
-              isSelectionMode ? Icons.checklist_rounded : Icons.inventory_2_rounded,
-              color: isSelectionMode ? colorScheme.onPrimaryContainer : colorScheme.primary,
+              isSelectionMode
+                  ? Icons.checklist_rounded
+                  : Icons.inventory_2_rounded,
+              color: isSelectionMode
+                  ? colorScheme.onPrimaryContainer
+                  : colorScheme.primary,
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -932,29 +1136,38 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
                 children: [
                   Text(
                     isSelectionMode
-                        ? AppLocalizationsStub.selectedCount(locale, _selectedIds.length)
+                        ? AppLocalizationsStub.selectedCount(
+                            locale,
+                            _selectedIds.length,
+                          )
                         : AppLocalizationsStub.myAddons(locale),
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: isSelectionMode ? colorScheme.onPrimaryContainer : colorScheme.onSurface,
-                        ),
+                      fontWeight: FontWeight.w700,
+                      color: isSelectionMode
+                          ? colorScheme.onPrimaryContainer
+                          : colorScheme.onSurface,
+                    ),
                   ),
                   Text(
                     isSelectionMode
                         ? AppLocalizationsStub.deleteSelected(locale)
                         : AppLocalizationsStub.refreshAddons(locale),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: isSelectionMode
-                              ? colorScheme.onPrimaryContainer.withValues(alpha: 0.8)
-                              : colorScheme.onSurfaceVariant,
-                        ),
+                      color: isSelectionMode
+                          ? colorScheme.onPrimaryContainer.withValues(
+                              alpha: 0.8,
+                            )
+                          : colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
             ),
             IconButton.filledTonal(
               tooltip: AppLocalizationsStub.scanAddons(locale),
-              onPressed: () => ref.read(localAddonsProvider(widget.client).notifier).refresh(),
+              onPressed: () => ref
+                  .read(localAddonsProvider(widget.client).notifier)
+                  .refresh(),
               icon: const Icon(Icons.refresh_rounded),
             ),
             if (isSelectionMode) ...[
@@ -974,6 +1187,7 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
   @override
   Widget build(BuildContext context) {
     final locale = ref.watch(appSettingsProvider).locale.languageCode;
+    final l10n = AppLocalizations.of(context)!;
     final colorScheme = Theme.of(context).colorScheme;
     final addonsAsync = ref.watch(localAddonsProvider(widget.client));
 
@@ -989,17 +1203,25 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
 
               if (addons.isEmpty) {
                 return RefreshIndicator(
-                  onRefresh: () => ref.read(localAddonsProvider(widget.client).notifier).refresh(),
+                  onRefresh: () => ref
+                      .read(localAddonsProvider(widget.client).notifier)
+                      .refresh(),
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(24, 0, 24, 140),
                     children: [
                       const SizedBox(height: 120),
-                      Icon(Icons.inventory_2_outlined, size: 64, color: colorScheme.outlineVariant),
+                      Icon(
+                        Icons.inventory_2_outlined,
+                        size: 64,
+                        color: colorScheme.outlineVariant,
+                      ),
                       const SizedBox(height: 16),
                       Text(
                         AppLocalizationsStub.noLocalAddons(locale),
                         textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: colorScheme.outline),
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: colorScheme.outline,
+                        ),
                       ),
                     ],
                   ),
@@ -1007,11 +1229,14 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
               }
 
               return RefreshIndicator(
-                onRefresh: () => ref.read(localAddonsProvider(widget.client).notifier).refresh(),
+                onRefresh: () => ref
+                    .read(localAddonsProvider(widget.client).notifier)
+                    .refresh(),
                 child: ListView.separated(
                   padding: const EdgeInsets.fromLTRB(24, 0, 24, 140),
                   itemCount: addons.length,
-                  separatorBuilder: (context, index) => const SizedBox(height: 12),
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final addon = addons[index];
                     final isSelected = _selectedIds.contains(addon.id);
@@ -1020,16 +1245,24 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
                       elevation: 0,
                       clipBehavior: Clip.antiAlias,
                       color: isSelected
-                          ? colorScheme.secondaryContainer.withValues(alpha: 0.55)
+                          ? colorScheme.secondaryContainer.withValues(
+                              alpha: 0.55,
+                            )
                           : colorScheme.surfaceContainerLow,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(24),
                         side: BorderSide(
-                          color: (isSelected ? colorScheme.secondary : colorScheme.outlineVariant).withValues(alpha: 0.35),
+                          color:
+                              (isSelected
+                                      ? colorScheme.secondary
+                                      : colorScheme.outlineVariant)
+                                  .withValues(alpha: 0.35),
                         ),
                       ),
                       child: Theme(
-                        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                        data: Theme.of(
+                          context,
+                        ).copyWith(dividerColor: Colors.transparent),
                         child: ExpansionTile(
                           backgroundColor: Colors.transparent,
                           collapsedBackgroundColor: Colors.transparent,
@@ -1039,8 +1272,16 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
                           collapsedShape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(24),
                           ),
-                          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                          tilePadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          childrenPadding: const EdgeInsets.fromLTRB(
+                            20,
+                            0,
+                            20,
+                            16,
+                          ),
                           leading: Checkbox(
                             value: isSelected,
                             onChanged: (_) => _toggleSelection(addon.id),
@@ -1054,7 +1295,9 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
                                       ? colorScheme.primaryContainer
                                       : colorScheme.secondaryContainer,
                                   child: Icon(
-                                    addon.isManaged ? Icons.cloud_done_rounded : Icons.folder_rounded,
+                                    addon.isManaged
+                                        ? Icons.cloud_done_rounded
+                                        : Icons.folder_rounded,
                                     color: addon.isManaged
                                         ? colorScheme.onPrimaryContainer
                                         : colorScheme.onSecondaryContainer,
@@ -1063,11 +1306,15 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
                                 const SizedBox(width: 14),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         addon.displayName,
-                                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium
+                                            ?.copyWith(
                                               fontWeight: FontWeight.w700,
                                             ),
                                       ),
@@ -1078,14 +1325,22 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
                                         children: [
                                           _InfoChip(
                                             icon: Icons.folder_copy_outlined,
-                                            label: AppLocalizationsStub.addonFolders(
-                                              locale,
-                                              addon.installedFolders.length,
-                                            ),
+                                            label:
+                                                AppLocalizationsStub.addonFolders(
+                                                  locale,
+                                                  addon.installedFolders.length,
+                                                ),
                                           ),
                                           _InfoChip(
-                                            icon: addon.isManaged ? Icons.link_rounded : Icons.home_repair_service_rounded,
-                                            label: addon.providerName ?? AppLocalizationsStub.localManual(locale),
+                                            icon: addon.isManaged
+                                                ? Icons.link_rounded
+                                                : Icons
+                                                      .home_repair_service_rounded,
+                                            label:
+                                                addon.providerName ??
+                                                AppLocalizationsStub.localManual(
+                                                  locale,
+                                                ),
                                           ),
                                           if ((addon.version ?? '').isNotEmpty)
                                             _InfoChip(
@@ -1104,19 +1359,29 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
                             for (final folderName in addon.installedFolders)
                               Container(
                                 margin: const EdgeInsets.only(top: 8),
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 12,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
+                                  color: colorScheme.surfaceContainerHighest
+                                      .withValues(alpha: 0.55),
                                   borderRadius: BorderRadius.circular(18),
                                 ),
                                 child: Row(
                                   children: [
-                                    Icon(Icons.subdirectory_arrow_right_rounded, color: colorScheme.primary),
+                                    Icon(
+                                      Icons.subdirectory_arrow_right_rounded,
+                                      color: colorScheme.primary,
+                                    ),
                                     const SizedBox(width: 12),
                                     Expanded(
                                       child: Text(
                                         folderName,
-                                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium
+                                            ?.copyWith(
                                               fontWeight: FontWeight.w600,
                                             ),
                                       ),
@@ -1128,9 +1393,12 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
                             Align(
                               alignment: Alignment.centerRight,
                               child: FilledButton.tonalIcon(
-                                onPressed: () => _handleDeleteGroups([addon], locale),
+                                onPressed: () =>
+                                    _handleDeleteGroups([addon], locale),
                                 icon: const Icon(Icons.delete_outline_rounded),
-                                label: Text(AppLocalizationsStub.delete(locale)),
+                                label: Text(
+                                  AppLocalizationsStub.delete(locale),
+                                ),
                               ),
                             ),
                           ],
@@ -1141,8 +1409,13 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
                 ),
               );
             },
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, s) => Center(child: Text('Error: $e')),
+            loading: () =>
+                _LoadingState(label: l10n.clientDetailsLoadingAddons),
+            error: (e, s) => _StatusMessage(
+              icon: Icons.error_outline_rounded,
+              title: l10n.clientDetailsLoadErrorTitle,
+              message: l10n.clientDetailsLoadErrorMessage(_formatError(e)),
+            ),
           ),
         ),
       ],
@@ -1154,10 +1427,7 @@ class _InfoChip extends StatelessWidget {
   final IconData icon;
   final String label;
 
-  const _InfoChip({
-    required this.icon,
-    required this.label,
-  });
+  const _InfoChip({required this.icon, required this.label});
 
   @override
   Widget build(BuildContext context) {
@@ -1176,9 +1446,164 @@ class _InfoChip extends StatelessWidget {
           Text(
             label,
             style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.onSurface,
+              fontWeight: FontWeight.w600,
+              color: colorScheme.onSurface,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _formatError(Object error) {
+  final message = error.toString().trim();
+  return message.startsWith('Exception: ')
+      ? message.substring('Exception: '.length)
+      : message;
+}
+
+class _LoadingState extends StatelessWidget {
+  final String label;
+
+  const _LoadingState({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 16),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusMessage extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  const _StatusMessage({
+    required this.icon,
+    required this.title,
+    required this.message,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 44, color: colorScheme.primary),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
                 ),
+              ),
+              if (actionLabel != null && onAction != null) ...[
+                const SizedBox(height: 20),
+                FilledButton.tonalIcon(
+                  onPressed: onAction,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: Text(actionLabel!),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FeedIntroCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  const _FeedIntroCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: colorScheme.primaryContainer,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: colorScheme.onPrimaryContainer),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1198,17 +1623,130 @@ class _SearchAddonsViewState extends ConsumerState<_SearchAddonsView> {
   final TextEditingController _searchController = TextEditingController();
   final _debounce = _Debouncer(milliseconds: 500);
 
+  _ClientSearchScopeKey get _scopeKey => _ClientSearchScopeKey(
+    clientId: widget.client.id,
+    gameVersion: widget.client.version,
+  );
+
+  String get _normalizedQuery => _searchController.text.trim();
+
   @override
   void dispose() {
+    _debounce.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
+  void _clearSearch() {
+    _debounce.cancel();
+    _searchController.clear();
+    ref.invalidate(searchResultsProvider(_scopeKey));
+    setState(() {});
+  }
+
+  void _handleQueryChanged(String value) {
+    final normalizedValue = value.trim();
+    setState(() {});
+
+    if (normalizedValue.isEmpty) {
+      _debounce.cancel();
+      ref.invalidate(searchResultsProvider(_scopeKey));
+      return;
+    }
+
+    _debounce.run(() {
+      ref
+          .read(searchResultsProvider(_scopeKey).notifier)
+          .search(normalizedValue, gameVersion: widget.client.version);
+    });
+  }
+
+  Widget _buildDiscoveryFeed() {
+    final l10n = AppLocalizations.of(context)!;
+    final discoveryFeed = ref.watch(discoveryFeedProvider(_scopeKey));
+
+    return discoveryFeed.when(
+      data: (mods) {
+        if (mods.isEmpty) {
+          return _StatusMessage(
+            icon: Icons.travel_explore_rounded,
+            title: l10n.discoveryFeedEmptyTitle,
+            message: l10n.discoveryFeedEmptyMessage(widget.client.version),
+          );
+        }
+
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 120),
+          itemCount: mods.length,
+          separatorBuilder: (context, index) => const SizedBox(height: 12),
+          itemBuilder: (context, index) =>
+              AddonSearchResultTile(mod: mods[index], client: widget.client),
+        );
+      },
+      loading: () => _LoadingState(
+        label: l10n.discoveryFeedLoading(widget.client.version),
+      ),
+      error: (e, s) => _StatusMessage(
+        icon: Icons.cloud_off_rounded,
+        title: l10n.discoveryFeedErrorTitle,
+        message: l10n.discoveryFeedErrorMessage(
+          widget.client.version,
+          _formatError(e),
+        ),
+        actionLabel: l10n.retryButton,
+        onAction: () =>
+            ref.read(discoveryFeedProvider(_scopeKey).notifier).load(),
+      ),
+    );
+  }
+
+  Widget _buildSearchResults() {
+    final l10n = AppLocalizations.of(context)!;
+    final query = _normalizedQuery;
+    final searchResults = ref.watch(searchResultsProvider(_scopeKey));
+
+    return searchResults.when(
+      data: (mods) {
+        if (mods.isEmpty) {
+          return _StatusMessage(
+            icon: Icons.search_off_rounded,
+            title: l10n.searchNoResultsTitle,
+            message: l10n.searchNoResultsMessage(query, widget.client.version),
+          );
+        }
+
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 120),
+          itemCount: mods.length,
+          separatorBuilder: (context, index) => const SizedBox(height: 12),
+          itemBuilder: (context, index) =>
+              AddonSearchResultTile(mod: mods[index], client: widget.client),
+        );
+      },
+      loading: () => _LoadingState(label: l10n.searchLoading(query)),
+      error: (e, s) => _StatusMessage(
+        icon: Icons.error_outline_rounded,
+        title: l10n.searchErrorTitle,
+        message: l10n.searchErrorMessage(_formatError(e)),
+        actionLabel: l10n.retryButton,
+        onAction: () => ref
+            .read(searchResultsProvider(_scopeKey).notifier)
+            .search(query, gameVersion: widget.client.version),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final locale = ref.watch(appSettingsProvider).locale.languageCode;
+    final l10n = AppLocalizations.of(context)!;
     final colorScheme = Theme.of(context).colorScheme;
-    final searchResults = ref.watch(searchResultsProvider);
+    final isDiscoveryMode = _normalizedQuery.isEmpty;
+    final sectionTitle = isDiscoveryMode
+        ? l10n.discoveryFeedTitle(widget.client.version)
+        : l10n.searchResultsTitle(_normalizedQuery);
+    final sectionSubtitle = isDiscoveryMode
+        ? l10n.discoveryFeedSubtitle(widget.client.version)
+        : l10n.searchResultsSubtitle(widget.client.version);
 
     return Column(
       children: [
@@ -1217,54 +1755,41 @@ class _SearchAddonsViewState extends ConsumerState<_SearchAddonsView> {
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: SearchBar(
             controller: _searchController,
-            hintText: AppLocalizationsStub.searchAddons(locale),
+            hintText: l10n.searchAddonsHint,
             leading: const Icon(Icons.search_rounded),
             trailing: [
               if (_searchController.text.isNotEmpty)
                 IconButton(
                   icon: const Icon(Icons.clear_rounded),
-                  onPressed: () {
-                    _searchController.clear();
-                    ref.read(searchResultsProvider.notifier).search('', gameVersion: widget.client.version);
-                  },
+                  onPressed: _clearSearch,
                 ),
             ],
-            onChanged: (value) {
-              _debounce.run(() {
-                ref.read(searchResultsProvider.notifier).search(value, gameVersion: widget.client.version);
-              });
-              setState(() {});
-            },
+            onChanged: _handleQueryChanged,
             elevation: WidgetStateProperty.all(0),
-            backgroundColor: WidgetStateProperty.all(colorScheme.surfaceContainer),
-            shape: WidgetStateProperty.all(RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+            backgroundColor: WidgetStateProperty.all(
+              colorScheme.surfaceContainer,
+            ),
+            shape: WidgetStateProperty.all(
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: _FeedIntroCard(
+            icon: isDiscoveryMode
+                ? Icons.auto_awesome_rounded
+                : Icons.search_rounded,
+            title: sectionTitle,
+            subtitle: sectionSubtitle,
           ),
         ),
         const SizedBox(height: 16),
         Expanded(
-          child: searchResults.when(
-            data: (mods) {
-              if (mods.isEmpty && _searchController.text.isEmpty) {
-                return Center(
-                  child: Text(
-                    locale == 'ru' ? 'Введите название аддона' : 'Enter addon name',
-                    style: TextStyle(color: colorScheme.outline),
-                  ),
-                );
-              }
-              return ListView.separated(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 120),
-                itemCount: mods.length,
-                separatorBuilder: (context, index) => const SizedBox(height: 12),
-                itemBuilder: (context, index) => AddonSearchResultTile(
-                  mod: mods[index],
-                  client: widget.client,
-                ),
-              );
-            },
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, s) => Center(child: Text('Error: $e')),
-          ),
+          child: isDiscoveryMode
+              ? _buildDiscoveryFeed()
+              : _buildSearchResults(),
         ),
       ],
     );
@@ -1298,11 +1823,15 @@ class _ClientHeader extends StatelessWidget {
                 children: [
                   Text(
                     '${AppLocalizationsStub.versionLabel(locale)} ${client.version}',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   Text(
                     client.path,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1320,10 +1849,16 @@ class AddonSearchResultTile extends ConsumerStatefulWidget {
   final AddonItem mod;
   final GameClient client;
   final ValueChanged<List<String>>? onInstalled;
-  const AddonSearchResultTile({super.key, required this.mod, required this.client, this.onInstalled});
+  const AddonSearchResultTile({
+    super.key,
+    required this.mod,
+    required this.client,
+    this.onInstalled,
+  });
 
   @override
-  ConsumerState<AddonSearchResultTile> createState() => _AddonSearchResultTileState();
+  ConsumerState<AddonSearchResultTile> createState() =>
+      _AddonSearchResultTileState();
 }
 
 class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
@@ -1337,19 +1872,31 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
       final searchService = ref.read(addonSearchServiceProvider);
       final installer = ref.read(addonInstallerServiceProvider);
 
-      final info = await searchService.getDownloadInfo(widget.mod, widget.client.version);
+      final info = await searchService.getDownloadInfo(
+        widget.mod,
+        widget.client.version,
+      );
 
       if (!mounted) return;
 
       if (info == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(AppLocalizationsStub.versionNotFound(locale, widget.client.version)),
+            content: Text(
+              AppLocalizationsStub.versionNotFound(
+                locale,
+                widget.client.version,
+              ),
+            ),
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
       } else {
-        final result = await installer.installAddon(info.url, info.fileName, widget.client);
+        final result = await installer.installAddon(
+          info.url,
+          info.fileName,
+          widget.client,
+        );
         await ref
             .read(localAddonsProvider(widget.client).notifier)
             .registerInstalledAddon(widget.mod, result.installedFolders);
@@ -1379,7 +1926,17 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
   @override
   Widget build(BuildContext context) {
     final locale = ref.watch(appSettingsProvider).locale.languageCode;
+    final l10n = AppLocalizations.of(context)!;
     final colorScheme = Theme.of(context).colorScheme;
+    final authorName = widget.mod.author?.trim();
+    final authorLabel = authorName == null || authorName.isEmpty
+        ? null
+        : l10n.addonAuthorLabel(
+            '${widget.mod.providerName == GitHubProvider.staticProviderName ? '@' : ''}$authorName',
+          );
+    final summary = widget.mod.summary.trim().isEmpty
+        ? l10n.addonNoDescription
+        : widget.mod.summary;
 
     return Card(
       elevation: 0,
@@ -1408,7 +1965,10 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
                       width: 64,
                       height: 64,
                       color: colorScheme.surfaceContainerHighest,
-                      child: Icon(Icons.extension_rounded, color: colorScheme.onSurfaceVariant),
+                      child: Icon(
+                        Icons.extension_rounded,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ),
@@ -1424,7 +1984,8 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
                       Expanded(
                         child: Text(
                           widget.mod.name,
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.bold),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1435,21 +1996,24 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
                   ),
                   Row(
                     children: [
-                      if (widget.mod.author != null)
+                      if (authorLabel != null)
                         Expanded(
                           child: Text(
-                            'by ${widget.mod.providerName == 'GitHub' ? '@' : ''}${widget.mod.author}',
-                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: Theme.of(context).colorScheme.secondary,
-                              fontWeight: FontWeight.w500,
-                            ),
+                            authorLabel,
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.secondary,
+                                  fontWeight: FontWeight.w500,
+                                ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       const SizedBox(width: 8),
                       Text(
-                        'Ver: ${widget.mod.version}',
+                        l10n.addonVersionLabel(widget.mod.version),
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: colorScheme.outline,
                         ),
@@ -1458,8 +2022,10 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    widget.mod.summary,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+                    summary,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1472,7 +2038,9 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 minimumSize: const Size(0, 40),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
               child: _isInstalling
                   ? const SizedBox(
@@ -1496,7 +2064,7 @@ class _ProviderBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isCF = providerName == 'CurseForge';
-    
+
     Color bgColor = Colors.grey.shade200;
     Color textColor = Colors.black87;
     Color borderColor = Colors.grey.shade400;
@@ -1516,7 +2084,11 @@ class _ProviderBadge extends StatelessWidget {
       ),
       child: Text(
         providerName,
-        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: textColor),
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+          color: textColor,
+        ),
       ),
     );
   }
@@ -1529,10 +2101,13 @@ class _Debouncer {
   _Debouncer({required this.milliseconds});
 
   void run(VoidCallback callback) {
-    if (_timer != null) {
-      _timer!.cancel();
-    }
+    cancel();
     _timer = Timer(Duration(milliseconds: milliseconds), callback);
+  }
+
+  void cancel() {
+    _timer?.cancel();
+    _timer = null;
   }
 }
 
@@ -1624,7 +2199,11 @@ class _EmptySectionPlaceholder extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 80, color: Theme.of(context).colorScheme.outlineVariant),
+          Icon(
+            icon,
+            size: 80,
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
           const SizedBox(height: 24),
           Text(
             'Section WIP',
@@ -1653,7 +2232,9 @@ class _FloatingNavBar extends StatelessWidget {
         decoration: BoxDecoration(
           color: colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(44),
-          border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.1)),
+          border: Border.all(
+            color: colorScheme.outlineVariant.withValues(alpha: 0.1),
+          ),
           boxShadow: [
             BoxShadow(
               color: colorScheme.shadow.withValues(alpha: 0.1),
@@ -1730,7 +2311,9 @@ class _NavItem extends StatelessWidget {
                 width: 24,
                 height: 24,
                 colorFilter: ColorFilter.mode(
-                  isSelected ? colorScheme.onPrimary : colorScheme.onSurfaceVariant,
+                  isSelected
+                      ? colorScheme.onPrimary
+                      : colorScheme.onSurfaceVariant,
                   BlendMode.srcIn,
                 ),
               ),
@@ -1829,14 +2412,29 @@ class _InterfaceSettingsView extends ConsumerWidget {
                   decoration: BoxDecoration(
                     color: color,
                     shape: BoxShape.circle,
-                    border: isSelected 
-                        ? Border.all(color: Theme.of(context).colorScheme.outline, width: 4)
+                    border: isSelected
+                        ? Border.all(
+                            color: Theme.of(context).colorScheme.outline,
+                            width: 4,
+                          )
                         : null,
-                    boxShadow: isSelected ? [
-                      BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 16, spreadRadius: 4)
-                    ] : null,
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: color.withValues(alpha: 0.4),
+                              blurRadius: 16,
+                              spreadRadius: 4,
+                            ),
+                          ]
+                        : null,
                   ),
-                  child: isSelected ? const Icon(Icons.check_rounded, color: Colors.white, size: 32) : null,
+                  child: isSelected
+                      ? const Icon(
+                          Icons.check_rounded,
+                          color: Colors.white,
+                          size: 32,
+                        )
+                      : null,
                 ),
               );
             }).toList(),
@@ -1872,10 +2470,14 @@ class _ChoiceChip<T> extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(vertical: 16),
         decoration: BoxDecoration(
-          color: isSelected ? colorScheme.primary : colorScheme.surfaceContainerLow,
+          color: isSelected
+              ? colorScheme.primary
+              : colorScheme.surfaceContainerLow,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isSelected ? colorScheme.primary : colorScheme.outlineVariant.withValues(alpha: 0.5),
+            color: isSelected
+                ? colorScheme.primary
+                : colorScheme.outlineVariant.withValues(alpha: 0.5),
           ),
         ),
         child: Center(
@@ -1897,7 +2499,11 @@ class _ThemeOption extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
 
-  const _ThemeOption({required this.icon, required this.isSelected, required this.onTap});
+  const _ThemeOption({
+    required this.icon,
+    required this.isSelected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1910,15 +2516,21 @@ class _ThemeOption extends StatelessWidget {
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 16),
           decoration: BoxDecoration(
-            color: isSelected ? colorScheme.secondaryContainer : colorScheme.surfaceContainerLow,
+            color: isSelected
+                ? colorScheme.secondaryContainer
+                : colorScheme.surfaceContainerLow,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: isSelected ? colorScheme.secondary : colorScheme.outlineVariant.withValues(alpha: 0.5),
+              color: isSelected
+                  ? colorScheme.secondary
+                  : colorScheme.outlineVariant.withValues(alpha: 0.5),
             ),
           ),
           child: Icon(
             icon,
-            color: isSelected ? colorScheme.onSecondaryContainer : colorScheme.onSurfaceVariant,
+            color: isSelected
+                ? colorScheme.onSecondaryContainer
+                : colorScheme.onSurfaceVariant,
             size: 28,
           ),
         ),
@@ -1995,14 +2607,24 @@ class _AboutSettingsView extends ConsumerWidget {
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.surfaceContainerLow,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5)),
+              border: Border.all(
+                color: Theme.of(
+                  context,
+                ).colorScheme.outlineVariant.withValues(alpha: 0.5),
+              ),
             ),
             child: Row(
               children: [
                 CircleAvatar(
                   radius: 28,
-                  backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                  child: Icon(Icons.person_rounded, color: Theme.of(context).colorScheme.onPrimaryContainer, size: 32),
+                  backgroundColor: Theme.of(
+                    context,
+                  ).colorScheme.primaryContainer,
+                  child: Icon(
+                    Icons.person_rounded,
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                    size: 32,
+                  ),
                 ),
                 const SizedBox(width: 20),
                 Column(
@@ -2010,11 +2632,15 @@ class _AboutSettingsView extends ConsumerWidget {
                   children: [
                     Text(
                       'WoW QAddOns Team',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     Text(
                       'Open Source Developers',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.outline),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
                     ),
                   ],
                 ),

@@ -7,28 +7,27 @@ import 'package:wow_qaddons_manager/domain/models/addon_item.dart';
 class GitHubProvider implements IAddonProvider {
   static const String staticProviderName = 'GitHub';
 
-  final Dio _dio =
-      Dio(
-        BaseOptions(
-          baseUrl: 'https://api.github.com',
-          connectTimeout: const Duration(seconds: 10),
-          receiveTimeout: const Duration(seconds: 10),
-          headers: {
-            'Accept': 'application/vnd.github.v3+json',
-          },
-        ),
-      );
+  final Dio _dio = Dio(
+    BaseOptions(
+      baseUrl: 'https://api.github.com',
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 10),
+      headers: {'Accept': 'application/vnd.github.v3+json'},
+    ),
+  );
 
-  final Dio _archiveDio =
-      Dio(
-        BaseOptions(
-          connectTimeout: const Duration(seconds: 10),
-          receiveTimeout: const Duration(seconds: 10),
-        ),
-      );
+  final Dio _archiveDio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 10),
+    ),
+  );
 
   @override
   String get providerName => staticProviderName;
+
+  @override
+  bool get supportsDiscoveryFeed => false;
 
   @override
   Future<List<AddonItem>> search(String query, String gameVersion) async {
@@ -63,7 +62,7 @@ class GitHubProvider implements IAddonProvider {
           continue;
         }
 
-        final description = _readString(item['description']) ?? 'No description available';
+        final description = _readString(item['description']) ?? '';
         if (_isRepositoryPack(name, description)) {
           continue;
         }
@@ -72,22 +71,26 @@ class GitHubProvider implements IAddonProvider {
           continue;
         }
 
-        final owner = item['owner'] is Map ? Map<String, dynamic>.from(item['owner'] as Map) : const <String, dynamic>{};
+        final owner = item['owner'] is Map
+            ? Map<String, dynamic>.from(item['owner'] as Map)
+            : const <String, dynamic>{};
         final fullName = _readString(item['full_name']);
         if (fullName == null) {
           continue;
         }
 
-        results.add(AddonItem(
-          id: 'gh-${item['id']}',
-          name: name,
-          summary: description,
-          author: _readString(owner['login']),
-          thumbnailUrl: _readString(owner['avatar_url']),
-          providerName: providerName,
-          originalId: fullName,
-          version: 'latest',
-        ));
+        results.add(
+          AddonItem(
+            id: 'gh-${item['id']}',
+            name: name,
+            summary: description,
+            author: _readString(owner['login']),
+            thumbnailUrl: _readString(owner['avatar_url']),
+            providerName: providerName,
+            originalId: fullName,
+            version: 'latest',
+          ),
+        );
       }
       return results;
     } catch (e) {
@@ -98,8 +101,18 @@ class GitHubProvider implements IAddonProvider {
     }
   }
 
+  @override
+  Future<List<AddonItem>> fetchPopularAddons(
+    String gameVersion, {
+    int limit = 50,
+  }) async {
+    return const <AddonItem>[];
+  }
+
   List<String> _buildSearchQueries(String query, WowVersionProfile profile) {
-    final versionToken = profile.majorMinor.isNotEmpty ? profile.majorMinor : profile.normalizedVersion;
+    final versionToken = profile.majorMinor.isNotEmpty
+        ? profile.majorMinor
+        : profile.normalizedVersion;
 
     return <String>[
       '$query "$versionToken" "wow addon" language:Lua',
@@ -124,18 +137,26 @@ class GitHubProvider implements IAddonProvider {
         return const <Map<String, dynamic>>[];
       }
 
-      return items.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList(growable: false);
+      return items
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList(growable: false);
     } catch (_) {
       return const <Map<String, dynamic>>[];
     }
   }
 
   @override
-  Future<({String url, String fileName})?> getDownloadUrl(AddonItem item, String gameVersion) async {
+  Future<({String url, String fileName})?> getDownloadUrl(
+    AddonItem item,
+    String gameVersion,
+  ) async {
     final profile = WowVersionProfile.parse(gameVersion);
 
     try {
-      final response = await _dio.get('/repos/${item.originalId}/releases/latest');
+      final response = await _dio.get(
+        '/repos/${item.originalId}/releases/latest',
+      );
       final assets = response.data is Map ? response.data['assets'] : null;
       final asset = _selectBestZipAsset(assets, profile);
 
@@ -151,14 +172,19 @@ class GitHubProvider implements IAddonProvider {
       }
     } catch (_) {
       if (kDebugMode) {
-        debugPrint('GitHub Release failed, trying branch fallback for ${item.originalId}');
+        debugPrint(
+          'GitHub Release failed, trying branch fallback for ${item.originalId}',
+        );
       }
     }
 
     return _resolveBranchArchive(item.originalId.toString());
   }
 
-  Map<String, dynamic>? _selectBestZipAsset(Object? assetsData, WowVersionProfile profile) {
+  Map<String, dynamic>? _selectBestZipAsset(
+    Object? assetsData,
+    WowVersionProfile profile,
+  ) {
     if (assetsData is! List) {
       return null;
     }
@@ -172,7 +198,10 @@ class GitHubProvider implements IAddonProvider {
               return name != null && name.endsWith('.zip');
             })
             .toList()
-          ..sort((a, b) => _scoreAsset(b, profile).compareTo(_scoreAsset(a, profile)));
+          ..sort(
+            (a, b) =>
+                _scoreAsset(b, profile).compareTo(_scoreAsset(a, profile)),
+          );
 
     if (candidates.isEmpty) {
       return null;
@@ -207,21 +236,25 @@ class GitHubProvider implements IAddonProvider {
 
   bool _isRepositoryPack(String name, String description) {
     final haystack = '$name $description'.toLowerCase();
-    return haystack.contains('pack') || haystack.contains('collection') || haystack.contains('bundle');
+    return haystack.contains('pack') ||
+        haystack.contains('collection') ||
+        haystack.contains('bundle');
   }
 
-  bool _matchesRequestedVersion(String name, String description, WowVersionProfile profile) {
+  bool _matchesRequestedVersion(
+    String name,
+    String description,
+    WowVersionProfile profile,
+  ) {
     final haystack = '$name $description'.toLowerCase();
     return !profile.containsConflictingVersionMarker(haystack);
   }
 
-  Future<({String url, String fileName})?> _resolveBranchArchive(String repository) async {
+  Future<({String url, String fileName})?> _resolveBranchArchive(
+    String repository,
+  ) async {
     final defaultBranch = await _fetchDefaultBranch(repository);
-    final candidates = <String>[
-      ?defaultBranch,
-      'main',
-      'master',
-    ];
+    final candidates = <String>[?defaultBranch, 'main', 'master'];
 
     final checkedBranches = <String>{};
     final repositoryName = repository.split('/').last;
@@ -231,7 +264,8 @@ class GitHubProvider implements IAddonProvider {
         continue;
       }
 
-      final url = 'https://github.com/$repository/archive/refs/heads/$branch.zip';
+      final url =
+          'https://github.com/$repository/archive/refs/heads/$branch.zip';
       if (await _branchArchiveExists(url)) {
         return (url: url, fileName: '$repositoryName-$branch.zip');
       }

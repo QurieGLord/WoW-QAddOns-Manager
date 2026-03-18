@@ -7,5 +7,95 @@
   "themeDark": "Темная тема",
   "language": "Язык",
   "scanTitle": "Поиск игровых клиентов",
-  "noClientsFound": "Клиенты WoW не найдены. Пожалуйста, выберите папку вручную."
+  "noClientsFound": "Клиенты WoW не найдены. Пожалуйста, выберите папку вручную.",
+  "clientDetailsTitle": "Сведения о клиенте",
+  "clientDetailsLoadingAddons": "Загрузка установленных аддонов...",
+  "clientDetailsLoadErrorTitle": "Не удалось загрузить установленные аддоны",
+  "clientDetailsLoadErrorMessage": "Не удалось загрузить список установленных аддонов: {details}",
+  "@clientDetailsLoadErrorMessage": {
+    "placeholders": {
+      "details": {}
+    }
+  },
+  "searchAddonsHint": "Поиск аддонов...",
+  "discoveryFeedTitle": "Популярные аддоны для версии {version}",
+  "@discoveryFeedTitle": {
+    "placeholders": {
+      "version": {}
+    }
+  },
+  "discoveryFeedSubtitle": "Это подборка популярных аддонов из CurseForge для версии клиента {version}, а не результаты текстового поиска.",
+  "@discoveryFeedSubtitle": {
+    "placeholders": {
+      "version": {}
+    }
+  },
+  "discoveryFeedLoading": "Загрузка популярных аддонов для версии {version}...",
+  "@discoveryFeedLoading": {
+    "placeholders": {
+      "version": {}
+    }
+  },
+  "discoveryFeedErrorTitle": "Не удалось загрузить подборку популярных аддонов",
+  "discoveryFeedErrorMessage": "Не удалось получить подборку популярных аддонов для версии {version}: {details}",
+  "@discoveryFeedErrorMessage": {
+    "placeholders": {
+      "version": {},
+      "details": {}
+    }
+  },
+  "discoveryFeedEmptyTitle": "Популярные аддоны не найдены",
+  "discoveryFeedEmptyMessage": "CurseForge не вернул подборку популярных аддонов для версии клиента {version}.",
+  "@discoveryFeedEmptyMessage": {
+    "placeholders": {
+      "version": {}
+    }
+  },
+  "searchResultsTitle": "Результаты для «{query}»",
+  "@searchResultsTitle": {
+    "placeholders": {
+      "query": {}
+    }
+  },
+  "searchResultsSubtitle": "Результаты поиска, совместимые с версией клиента {version}.",
+  "@searchResultsSubtitle": {
+    "placeholders": {
+      "version": {}
+    }
+  },
+  "searchLoading": "Поиск по запросу «{query}»...",
+  "@searchLoading": {
+    "placeholders": {
+      "query": {}
+    }
+  },
+  "searchErrorTitle": "Не удалось выполнить поиск",
+  "searchErrorMessage": "Запрос поиска завершился ошибкой: {details}",
+  "@searchErrorMessage": {
+    "placeholders": {
+      "details": {}
+    }
+  },
+  "searchNoResultsTitle": "Ничего не найдено",
+  "searchNoResultsMessage": "Для запроса «{query}» и версии клиента {version} аддоны не найдены.",
+  "@searchNoResultsMessage": {
+    "placeholders": {
+      "query": {},
+      "version": {}
+    }
+  },
+  "retryButton": "Повторить",
+  "addonAuthorLabel": "Автор: {author}",
+  "@addonAuthorLabel": {
+    "placeholders": {
+      "author": {}
+    }
+  },
+  "addonVersionLabel": "Версия: {version}",
+  "@addonVersionLabel": {
+    "placeholders": {
+      "version": {}
+    }
+  },
+  "addonNoDescription": "Описание отсутствует"
 }
