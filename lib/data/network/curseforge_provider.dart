@@ -68,20 +68,40 @@ class CurseForgeProvider implements IAddonProvider {
   }
 
   String _resolveMatchedVersion(CfFile file, WowVersionProfile profile) {
-    for (final version in file.gameVersions) {
-      if (version.toLowerCase() == profile.normalizedVersion) {
-        return version;
-      }
+    final compatibleVersions =
+        file.gameVersions
+            .where((version) => profile.numericCompatibilityScore(<String>[version]) > 0)
+            .toList()
+          ..sort((a, b) {
+            final scoreComparison = profile
+                .numericCompatibilityScore(<String>[b])
+                .compareTo(profile.numericCompatibilityScore(<String>[a]));
+            if (scoreComparison != 0) {
+              return scoreComparison;
+            }
+
+            final aProfile = WowVersionProfile.parse(a);
+            final bProfile = WowVersionProfile.parse(b);
+            final aExact = aProfile.exactVersion == profile.exactVersion ? 1 : 0;
+            final bExact = bProfile.exactVersion == profile.exactVersion ? 1 : 0;
+            return bExact.compareTo(aExact);
+          });
+
+    if (compatibleVersions.isNotEmpty) {
+      return compatibleVersions.first;
     }
 
-    for (final version in file.gameVersions) {
-      if (version.toLowerCase().startsWith(profile.majorMinor)) {
-        return version;
-      }
+    if (file.displayName != null &&
+        profile.numericCompatibilityScore(<String>[file.displayName!]) > 0) {
+      return profile.exactVersion != profile.majorMinor
+          ? profile.exactVersion
+          : profile.majorMinor;
     }
 
-    if (file.displayName != null && profile.containsRequestedVersion(file.displayName!)) {
-      return profile.majorMinor;
+    if (profile.numericCompatibilityScore(<String>[file.fileName]) > 0) {
+      return profile.exactVersion != profile.majorMinor
+          ? profile.exactVersion
+          : profile.majorMinor;
     }
 
     return file.gameVersions.isNotEmpty ? file.gameVersions.first : profile.majorMinor;

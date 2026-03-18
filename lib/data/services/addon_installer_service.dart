@@ -126,13 +126,22 @@ class AddonInstallerService {
   }
 
   Future<void> _extractArchive(Archive archive, String outputPath) async {
+    final normalizedOutputPath = p.normalize(outputPath);
+
     for (final file in archive) {
-      final sanitizedName = p.normalize(file.name.replaceAll('\\', p.separator));
-      if (sanitizedName.startsWith('..')) {
+      final sanitizedName = p.normalize(file.name.replaceAll('\\', p.separator).trim());
+      if (sanitizedName.isEmpty ||
+          p.isAbsolute(sanitizedName) ||
+          sanitizedName.startsWith('..') ||
+          sanitizedName.startsWith('/')) {
         continue;
       }
 
-      final filePath = p.join(outputPath, sanitizedName);
+      final filePath = p.normalize(p.join(normalizedOutputPath, sanitizedName));
+      if (filePath != normalizedOutputPath && !p.isWithin(normalizedOutputPath, filePath)) {
+        continue;
+      }
+
       if (file.isFile) {
         final outFile = File(filePath);
         await outFile.create(recursive: true);
@@ -190,24 +199,40 @@ class AddonInstallerService {
       return null;
     }
 
-    final isTempRoot = p.basename(root.path).startsWith('extract_');
-    if (isTempRoot) {
-      if (tocFiles.isEmpty) {
-        return _sanitizeFolderName(_stripArchiveExtension(archiveFileName));
-      }
-
-      final matchingToc = tocFiles.firstWhere(
-        (file) {
-          final tocName = p.basenameWithoutExtension(file.path).toLowerCase();
-          final archiveName = _stripArchiveExtension(archiveFileName).toLowerCase();
-          return tocName == archiveName;
-        },
-        orElse: () => tocFiles.first,
-      );
-      return _sanitizeFolderName(p.basenameWithoutExtension(matchingToc.path));
+    if (tocFiles.isEmpty) {
+      return _sanitizeFolderName(_stripArchiveExtension(archiveFileName));
     }
 
-    return _sanitizeFolderName(p.basename(root.path));
+    final rootFolderName = p.basename(root.path);
+    final normalizedRootFolderName = _normalizeFolderKey(rootFolderName);
+    final archiveBaseName = _normalizeFolderKey(_stripArchiveExtension(archiveFileName));
+    final tocNames =
+        tocFiles
+            .map((file) => p.basenameWithoutExtension(file.path))
+            .where((name) => name.trim().isNotEmpty)
+            .toList(growable: false);
+
+    final matchingTocByFolder = tocNames.firstWhere(
+      (tocName) => _normalizeFolderKey(tocName) == normalizedRootFolderName,
+      orElse: () => '',
+    );
+    if (matchingTocByFolder.isNotEmpty) {
+      return _sanitizeFolderName(matchingTocByFolder);
+    }
+
+    final matchingTocByArchive = tocNames.firstWhere(
+      (tocName) => _normalizeFolderKey(tocName) == archiveBaseName,
+      orElse: () => '',
+    );
+    if (matchingTocByArchive.isNotEmpty) {
+      return _sanitizeFolderName(matchingTocByArchive);
+    }
+
+    if (tocNames.length == 1) {
+      return _sanitizeFolderName(tocNames.first);
+    }
+
+    return _sanitizeFolderName(rootFolderName);
   }
 
   Future<void> _copyAddonRoot(Directory source, Directory target) async {
@@ -343,6 +368,13 @@ class AddonInstallerService {
         .replaceAll(RegExp(r'_+'), '_')
         .trim();
     return cleaned.isEmpty ? 'Addon' : cleaned;
+  }
+
+  String _normalizeFolderKey(String input) {
+    return input
+        .toLowerCase()
+        .replaceAll(RegExp(r'-(main|master)$', caseSensitive: false), '')
+        .replaceAll(RegExp(r'[^a-z0-9]'), '');
   }
 
   Future<void> _safeDeleteDirectory(Directory directory) async {

@@ -56,8 +56,11 @@ class GitHubProvider implements IAddonProvider {
         }
       }
 
+      final rankedRepositories = itemsByRepo.values.toList()
+        ..sort((a, b) => _scoreRepository(b, profile).compareTo(_scoreRepository(a, profile)));
+
       final List<AddonItem> results = [];
-      for (final item in itemsByRepo.values) {
+      for (final item in rankedRepositories) {
         final name = _readString(item['name']);
         if (name == null) {
           continue;
@@ -99,12 +102,24 @@ class GitHubProvider implements IAddonProvider {
   }
 
   List<String> _buildSearchQueries(String query, WowVersionProfile profile) {
-    final versionToken = profile.majorMinor.isNotEmpty ? profile.majorMinor : profile.normalizedVersion;
+    final numericTokens = profile.apiVersionCandidates.where((token) => token.length >= 3).toList();
+    final familyToken = profile.familySearchKeywords.firstWhere(
+      (token) => !RegExp(r'^\d').hasMatch(token),
+      orElse: () => '',
+    );
 
-    return <String>[
-      '$query "$versionToken" "wow addon" language:Lua',
-      '$query "$versionToken" "world of warcraft"',
+    final queries = <String>[
+      if (numericTokens.isNotEmpty) '$query "${numericTokens.first}" "wow addon" language:Lua',
+      if (numericTokens.length > 1) '$query "${numericTokens.last}" addon language:Lua',
+      if (familyToken.isNotEmpty) '$query "$familyToken" "wow addon" language:Lua',
+      if (familyToken.isNotEmpty) '$query "$familyToken" "world of warcraft"',
     ];
+
+    if (queries.isEmpty) {
+      return <String>['$query "wow addon" language:Lua'];
+    }
+
+    return queries.toSet().toList(growable: false);
   }
 
   Future<List<Map<String, dynamic>>> _performSearch(String query) async {
@@ -191,18 +206,19 @@ class GitHubProvider implements IAddonProvider {
     final haystack = name.toLowerCase();
 
     if (profile.containsConflictingVersionMarker(haystack)) {
-      return -100;
+      return -200;
     }
 
-    if (profile.containsRequestedVersion(haystack)) {
-      return 100;
+    final compatibilityScore = profile.numericCompatibilityScore([haystack]);
+    if (compatibilityScore >= 100) {
+      return compatibilityScore + 20;
     }
 
     if (profile.containsKnownVersionMarker(haystack)) {
-      return -10;
+      return -50;
     }
 
-    return 10;
+    return 15;
   }
 
   bool _isRepositoryPack(String name, String description) {
@@ -212,7 +228,33 @@ class GitHubProvider implements IAddonProvider {
 
   bool _matchesRequestedVersion(String name, String description, WowVersionProfile profile) {
     final haystack = '$name $description'.toLowerCase();
-    return !profile.containsConflictingVersionMarker(haystack);
+    if (profile.containsConflictingVersionMarker(haystack)) {
+      return false;
+    }
+
+    final score = profile.numericCompatibilityScore([haystack]);
+    if (score >= 100) {
+      return true;
+    }
+
+    return !profile.containsKnownVersionMarker(haystack);
+  }
+
+  int _scoreRepository(Map<String, dynamic> repository, WowVersionProfile profile) {
+    final name = _readString(repository['name']) ?? '';
+    final description = _readString(repository['description']) ?? '';
+    final haystack = '$name $description'.toLowerCase();
+
+    if (profile.containsConflictingVersionMarker(haystack)) {
+      return -200;
+    }
+
+    final compatibilityScore = profile.numericCompatibilityScore([haystack]);
+    if (compatibilityScore > 0) {
+      return compatibilityScore;
+    }
+
+    return profile.containsKnownVersionMarker(haystack) ? -40 : 10;
   }
 
   Future<({String url, String fileName})?> _resolveBranchArchive(String repository) async {

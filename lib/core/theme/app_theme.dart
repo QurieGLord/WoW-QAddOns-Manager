@@ -3,12 +3,17 @@ import 'package:flutter/material.dart';
 class AppTheme {
   /// Создает тему на основе выбранного базового цвета
   static ThemeData createTheme(Brightness brightness, Color seedColor) {
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: seedColor,
+      brightness: brightness,
+    );
+
     return ThemeData(
       useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: seedColor,
-        brightness: brightness,
-      ),
+      colorScheme: colorScheme,
+      splashFactory: InkRipple.splashFactory,
+      hoverColor: colorScheme.primary.withValues(alpha: 0.05),
+      highlightColor: colorScheme.primary.withValues(alpha: 0.08),
       appBarTheme: const AppBarTheme(
         centerTitle: true,
         elevation: 0,
