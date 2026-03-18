@@ -35,6 +35,24 @@ class AddonInstallerService {
         throw Exception('NO_TOC_FOLDERS_FOUND');
       }
 
+      final targetFolderNames = <String>{};
+      for (final root in addonRoots) {
+        final targetFolderName = await _resolveTargetFolderName(root, fileName);
+        if (targetFolderName == null || targetFolderName.trim().isEmpty) {
+          continue;
+        }
+
+        targetFolderNames.add(targetFolderName);
+      }
+
+      if (targetFolderNames.isEmpty) {
+        throw Exception('NO_VALID_ADDON_CONTENT');
+      }
+
+      if (await _allTargetFoldersExist(addonsDir, targetFolderNames)) {
+        throw Exception('ALREADY_INSTALLED');
+      }
+
       final installedFolders = <String>{};
       for (final root in addonRoots) {
         final targetFolderName = await _resolveTargetFolderName(root, fileName);
@@ -94,6 +112,7 @@ class AddonInstallerService {
           folderName: folderName,
           displayName: metadata.title,
           title: metadata.title,
+          tocNames: metadata.tocNames,
           dependencies: metadata.dependencies,
           xPartOf: metadata.xPartOf,
         ),
@@ -235,6 +254,20 @@ class AddonInstallerService {
     return _sanitizeFolderName(rootFolderName);
   }
 
+  Future<bool> _allTargetFoldersExist(
+    Directory addonsDir,
+    Iterable<String> folderNames,
+  ) async {
+    for (final folderName in folderNames) {
+      final targetDir = Directory(p.join(addonsDir.path, folderName));
+      if (!await targetDir.exists()) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   Future<void> _copyAddonRoot(Directory source, Directory target) async {
     await target.create(recursive: true);
     await for (final entity in source.list(recursive: false)) {
@@ -287,6 +320,11 @@ class AddonInstallerService {
 
   Future<_TocMetadata> _parseAddonMetadata(List<File> tocFiles, String fallback) async {
     String displayName = fallback;
+    final tocNames =
+        tocFiles
+            .map((file) => p.basenameWithoutExtension(file.path))
+            .where((name) => name.trim().isNotEmpty)
+            .toList(growable: false);
     final dependencies = <String>[];
     String? xPartOf;
 
@@ -333,6 +371,7 @@ class AddonInstallerService {
 
     return _TocMetadata(
       title: displayName,
+      tocNames: tocNames,
       dependencies: dependencies.toSet().toList(),
       xPartOf: xPartOf,
     );
@@ -392,11 +431,13 @@ class AddonInstallerService {
 
 class _TocMetadata {
   final String title;
+  final List<String> tocNames;
   final List<String> dependencies;
   final String? xPartOf;
 
   const _TocMetadata({
     required this.title,
+    this.tocNames = const <String>[],
     this.dependencies = const <String>[],
     this.xPartOf,
   });

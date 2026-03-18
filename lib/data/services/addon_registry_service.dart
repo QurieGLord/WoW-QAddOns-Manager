@@ -23,10 +23,17 @@ class AddonRegistryService {
             return null;
           }
 
+          final folderDetails =
+              existingFolders
+                  .map((folderName) => scannedMap[folderName])
+                  .whereType<InstalledAddonFolder>()
+                  .toList(growable: false);
+
           return group.copyWith(
             displayName: group.displayName,
             installedFolders: existingFolders,
             isManaged: true,
+            folderDetails: folderDetails,
           );
         })
         .whereType<InstalledAddonGroup>()
@@ -65,6 +72,7 @@ class AddonRegistryService {
         id: _buildManagedId(addon),
         displayName: addon.name,
         providerName: addon.providerName,
+        originalId: addon.originalId.toString(),
         version: addon.version,
         installedFolders: folders,
         isManaged: true,
@@ -130,6 +138,7 @@ class AddonRegistryService {
           displayName: root.title,
           installedFolders: foldersInGroup.map((folder) => folder.folderName).toList(),
           isManaged: false,
+          folderDetails: foldersInGroup,
         ),
       );
     }
@@ -143,6 +152,7 @@ class AddonRegistryService {
           displayName: syntheticGroup.displayName,
           installedFolders: sortedFolders.map((folder) => folder.folderName).toList(),
           isManaged: false,
+          folderDetails: sortedFolders,
         ),
       );
     }
@@ -393,10 +403,20 @@ class AddonRegistryService {
   }
 
   String _buildManagedId(AddonItem addon) {
-    final normalizedName = addon.name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-');
     final provider = addon.providerName.toLowerCase();
-    final originalId = addon.originalId.toString().toLowerCase().replaceAll(RegExp(r'[^a-z0-9._/-]+'), '-');
-    return '$provider:$normalizedName:$originalId';
+    final originalId =
+        addon.originalId
+            .toString()
+            .toLowerCase()
+            .replaceAll(RegExp(r'[^a-z0-9._/-]+'), '-');
+    if (originalId.isNotEmpty) {
+      return '$provider:$originalId';
+    }
+
+    final normalizedName = addon.name
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-');
+    return '$provider:$normalizedName';
   }
 
   Future<List<InstalledAddonGroup>> _readRegistry(GameClient client) async {

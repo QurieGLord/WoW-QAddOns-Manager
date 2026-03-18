@@ -15,6 +15,7 @@ import 'package:wow_qaddons_manager/data/network/curseforge_provider.dart';
 import 'package:wow_qaddons_manager/data/network/github_provider.dart';
 import 'package:wow_qaddons_manager/data/services/addon_search_service.dart';
 import 'package:wow_qaddons_manager/data/services/addon_installer_service.dart';
+import 'package:wow_qaddons_manager/data/services/addon_identity_service.dart';
 import 'package:wow_qaddons_manager/data/services/addon_registry_service.dart';
 import 'package:wow_qaddons_manager/domain/models/addon_item.dart';
 import 'package:wow_qaddons_manager/domain/models/installed_addon.dart';
@@ -36,6 +37,7 @@ final addonSearchServiceProvider = Provider((ref) {
 final addonInstallerServiceProvider = Provider(
   (ref) => AddonInstallerService(),
 );
+final addonIdentityServiceProvider = Provider((ref) => AddonIdentityService());
 final addonRegistryServiceProvider = Provider((ref) => AddonRegistryService());
 
 // Состояние установленных аддонов
@@ -50,12 +52,21 @@ class LocalAddonsNotifier
   }
 
   Future<void> refresh() async {
-    state = const AsyncValue.loading();
+    final previousAddons = state.valueOrNull;
+    if (previousAddons == null) {
+      state = const AsyncValue.loading();
+    }
+
     try {
       final scannedFolders = await _installer.scanInstalledFolders(_client);
       final addons = await _registry.loadAddonGroups(_client, scannedFolders);
       state = AsyncValue.data(addons);
     } catch (e, s) {
+      if (previousAddons != null) {
+        state = AsyncValue.data(previousAddons);
+        return;
+      }
+
       state = AsyncValue.error(e, s);
     }
   }
@@ -290,12 +301,17 @@ class AppLocalizationsStub {
       locale == 'ru' ? 'Установка...' : 'Installing...';
   static String install(String locale) =>
       locale == 'ru' ? 'Установить' : 'Install';
+  static String installed(String locale) =>
+      locale == 'ru' ? 'Установлено' : 'Installed';
   static String versionNotFound(String locale, String version) => locale == 'ru'
       ? 'Файл не найден для версии $version (или совместимой)'
       : 'No file found for version $version (or compatible)';
   static String installSuccess(String locale) => locale == 'ru'
       ? 'Аддон успешно установлен'
       : 'Addon installed successfully';
+  static String alreadyInstalled(String locale, String name) => locale == 'ru'
+      ? 'Аддон уже установлен: $name'
+      : 'Addon is already installed: $name';
   static String installError(String locale) =>
       locale == 'ru' ? 'Ошибка' : 'Error';
   static String myAddons(String locale) =>
@@ -1663,6 +1679,10 @@ class _SearchAddonsViewState extends ConsumerState<_SearchAddonsView> {
   Widget _buildDiscoveryFeed() {
     final l10n = AppLocalizations.of(context)!;
     final discoveryFeed = ref.watch(discoveryFeedProvider(_scopeKey));
+    final identityService = ref.watch(addonIdentityServiceProvider);
+    final installedGroups =
+        ref.watch(localAddonsProvider(widget.client)).valueOrNull ??
+        const <InstalledAddonGroup>[];
 
     return discoveryFeed.when(
       data: (mods) {
@@ -1679,7 +1699,14 @@ class _SearchAddonsViewState extends ConsumerState<_SearchAddonsView> {
           itemCount: mods.length,
           separatorBuilder: (context, index) => const SizedBox(height: 12),
           itemBuilder: (context, index) =>
-              AddonSearchResultTile(mod: mods[index], client: widget.client),
+              AddonSearchResultTile(
+                mod: mods[index],
+                client: widget.client,
+                installedMatch: identityService.matchInstalledAddon(
+                  mods[index],
+                  installedGroups,
+                ),
+              ),
         );
       },
       loading: () => _LoadingState(
@@ -1703,6 +1730,10 @@ class _SearchAddonsViewState extends ConsumerState<_SearchAddonsView> {
     final l10n = AppLocalizations.of(context)!;
     final query = _normalizedQuery;
     final searchResults = ref.watch(searchResultsProvider(_scopeKey));
+    final identityService = ref.watch(addonIdentityServiceProvider);
+    final installedGroups =
+        ref.watch(localAddonsProvider(widget.client)).valueOrNull ??
+        const <InstalledAddonGroup>[];
 
     return searchResults.when(
       data: (mods) {
@@ -1719,7 +1750,14 @@ class _SearchAddonsViewState extends ConsumerState<_SearchAddonsView> {
           itemCount: mods.length,
           separatorBuilder: (context, index) => const SizedBox(height: 12),
           itemBuilder: (context, index) =>
-              AddonSearchResultTile(mod: mods[index], client: widget.client),
+              AddonSearchResultTile(
+                mod: mods[index],
+                client: widget.client,
+                installedMatch: identityService.matchInstalledAddon(
+                  mods[index],
+                  installedGroups,
+                ),
+              ),
         );
       },
       loading: () => _LoadingState(label: l10n.searchLoading(query)),
@@ -1849,11 +1887,13 @@ class _ClientHeader extends StatelessWidget {
 class AddonSearchResultTile extends ConsumerStatefulWidget {
   final AddonItem mod;
   final GameClient client;
+  final AddonInstalledMatch installedMatch;
   final ValueChanged<List<String>>? onInstalled;
   const AddonSearchResultTile({
     super.key,
     required this.mod,
     required this.client,
+    required this.installedMatch,
     this.onInstalled,
   });
 
@@ -1872,6 +1912,9 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
     try {
       final searchService = ref.read(addonSearchServiceProvider);
       final installer = ref.read(addonInstallerServiceProvider);
+      final identityService = ref.read(addonIdentityServiceProvider);
+      final localAddonsNotifier =
+          ref.read(localAddonsProvider(widget.client).notifier);
 
       final info = await searchService.getDownloadInfo(
         widget.mod,
@@ -1893,6 +1936,28 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
           ),
         );
       } else {
+        await localAddonsNotifier.refresh();
+        if (!mounted) return;
+
+        final latestGroups =
+            ref.read(localAddonsProvider(widget.client)).valueOrNull ??
+            const <InstalledAddonGroup>[];
+        final duplicateMatch = identityService.matchInstalledAddon(
+          widget.mod,
+          latestGroups,
+        );
+        if (duplicateMatch.isInstalled) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                AppLocalizationsStub.alreadyInstalled(locale, widget.mod.name),
+              ),
+              backgroundColor: Theme.of(context).colorScheme.secondary,
+            ),
+          );
+          return;
+        }
+
         final result = await installer.installAddon(
           info.url,
           info.fileName,
@@ -1912,9 +1977,14 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
       }
     } catch (e) {
       if (mounted) {
+        final errorText = '$e';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${AppLocalizationsStub.installError(locale)}: $e'),
+            content: Text(
+              errorText.contains('ALREADY_INSTALLED')
+                  ? AppLocalizationsStub.alreadyInstalled(locale, widget.mod.name)
+                  : '${AppLocalizationsStub.installError(locale)}: $e',
+            ),
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
@@ -1929,6 +1999,7 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
     final locale = ref.watch(appSettingsProvider).locale.languageCode;
     final l10n = AppLocalizations.of(context)!;
     final colorScheme = Theme.of(context).colorScheme;
+    final installedMatch = widget.installedMatch;
     final authorName = widget.mod.author?.trim();
     final authorLabel = authorName == null || authorName.isEmpty
         ? null
@@ -2038,23 +2109,56 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
               ),
             ),
             const SizedBox(width: 16),
-            FilledButton.tonal(
-              onPressed: _isInstalling ? null : _handleInstall,
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                minimumSize: const Size(0, 40),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+            if (installedMatch.isInstalled)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
                 ),
+                decoration: BoxDecoration(
+                  color: colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: colorScheme.secondary.withValues(alpha: 0.28),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.check_circle_rounded,
+                      size: 18,
+                      color: colorScheme.onSecondaryContainer,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      AppLocalizationsStub.installed(locale),
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: colorScheme.onSecondaryContainer,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              FilledButton.tonal(
+                onPressed: _isInstalling ? null : _handleInstall,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  minimumSize: const Size(0, 40),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: _isInstalling
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(AppLocalizationsStub.install(locale)),
               ),
-              child: _isInstalling
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text(AppLocalizationsStub.install(locale)),
-            ),
           ],
         ),
       ),

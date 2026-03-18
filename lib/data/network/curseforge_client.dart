@@ -82,12 +82,13 @@ class CurseForgeClient {
 
     try {
       final profile = WowVersionProfile.parse(requestedVersion);
-      final attempts = <String>[
+      final attempts = <String?>[
         if (!profile.apiVersionCandidates.contains(
           requestedVersion.toLowerCase(),
         ))
           requestedVersion,
         ...profile.apiVersionCandidates,
+        null,
       ];
 
       final modsById = <int, CfMod>{};

@@ -6,6 +6,8 @@ class AddonItem {
   final String? thumbnailUrl;
   final String providerName;
   final dynamic originalId; // modId for CF, full_name for GH
+  final String? sourceSlug;
+  final List<String> identityHints;
   final String version;
 
   AddonItem({
@@ -16,6 +18,8 @@ class AddonItem {
     this.thumbnailUrl,
     required this.providerName,
     required this.originalId,
+    this.sourceSlug,
+    this.identityHints = const <String>[],
     this.version = 'N/A',
   });
 }

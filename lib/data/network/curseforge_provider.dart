@@ -42,6 +42,12 @@ class CurseForgeProvider implements IAddonProvider {
           thumbnailUrl: mod.logo?.thumbnailUrl,
           providerName: providerName,
           originalId: mod.id,
+          identityHints: <String>[
+            mod.name,
+            if (matchedFile.displayName != null) matchedFile.displayName!,
+            matchedFile.fileName,
+            _deriveNameFromFileName(matchedFile.fileName),
+          ],
           version: _resolveMatchedVersion(matchedFile, profile),
         ),
       );
@@ -80,6 +86,12 @@ class CurseForgeProvider implements IAddonProvider {
           thumbnailUrl: mod.logo?.thumbnailUrl,
           providerName: providerName,
           originalId: mod.id,
+          identityHints: <String>[
+            mod.name,
+            if (matchedFile.displayName != null) matchedFile.displayName!,
+            matchedFile.fileName,
+            _deriveNameFromFileName(matchedFile.fileName),
+          ],
           version: _resolveMatchedVersion(matchedFile, profile),
         );
       }),

@@ -50,7 +50,7 @@ class GitHubProvider implements IAddonProvider {
           itemsByRepo[fullName] = item;
         }
 
-        if (itemsByRepo.length >= 10) {
+        if (itemsByRepo.length >= 16) {
           break;
         }
       }
@@ -96,6 +96,12 @@ class GitHubProvider implements IAddonProvider {
             thumbnailUrl: _readString(owner['avatar_url']),
             providerName: providerName,
             originalId: fullName,
+            sourceSlug: fullName.split('/').last,
+            identityHints: <String>[
+              name,
+              fullName,
+              fullName.split('/').last,
+            ],
             version: 'latest',
           ),
         );
@@ -134,11 +140,11 @@ class GitHubProvider implements IAddonProvider {
       if (familyToken.isNotEmpty)
         '$query "$familyToken" "wow addon" language:Lua',
       if (familyToken.isNotEmpty) '$query "$familyToken" "world of warcraft"',
+      if (profile.isRetailEra) '$query "retail" "wow addon" language:Lua',
+      if (profile.isRetailEra) '$query "retail" "world of warcraft"',
+      '$query "wow addon" language:Lua',
+      '$query "world of warcraft addon"',
     ];
-
-    if (queries.isEmpty) {
-      return <String>['$query "wow addon" language:Lua'];
-    }
 
     return queries.toSet().toList(growable: false);
   }
@@ -151,7 +157,7 @@ class GitHubProvider implements IAddonProvider {
           'q': query,
           'sort': 'stars',
           'order': 'desc',
-          'per_page': 10,
+          'per_page': 12,
         },
       );
 

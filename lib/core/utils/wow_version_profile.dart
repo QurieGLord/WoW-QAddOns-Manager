@@ -78,6 +78,8 @@ class WowVersionProfile {
     };
   }
 
+  bool get allowsSameMajorBranchFallback => isRetailEra;
+
   List<String> get apiVersionCandidates {
     if (!hasNumericVersion) {
       return const <String>[];
@@ -189,6 +191,10 @@ class WowVersionProfile {
       score = score < 200 ? 200 : score;
     }
 
+    if (allowsSameMajorBranchFallback && _hasSameMajorNumericVersion(value)) {
+      score = score < 85 ? 85 : score;
+    }
+
     if (_containsFamilyAlias(haystack)) {
       score = score < 120 ? 120 : score;
     }
@@ -256,6 +262,10 @@ class WowVersionProfile {
           continue;
         }
 
+        if (allowsSameMajorBranchFallback && _isAllowedSameMajorBranch(branch)) {
+          continue;
+        }
+
         if (_containsToken(text, branch)) {
           return true;
         }
@@ -263,6 +273,28 @@ class WowVersionProfile {
     }
 
     return false;
+  }
+
+  bool _hasSameMajorNumericVersion(String value) {
+    if (!hasNumericVersion || !allowsSameMajorBranchFallback) {
+      return false;
+    }
+
+    final candidate = WowVersionProfile.parse(value);
+    return candidate.hasNumericVersion &&
+        candidate.major == major &&
+        candidate.majorMinor != majorMinor;
+  }
+
+  bool _isAllowedSameMajorBranch(String branch) {
+    if (!hasNumericVersion || !allowsSameMajorBranchFallback) {
+      return false;
+    }
+
+    final candidate = WowVersionProfile.parse(branch);
+    return candidate.hasNumericVersion &&
+        candidate.major == major &&
+        candidate.majorMinor != majorMinor;
   }
 
   static bool _looksLikeVersion(String value) {
