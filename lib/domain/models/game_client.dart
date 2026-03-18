@@ -12,6 +12,7 @@ class GameClient {
   final String version;
   final String build;
   final ClientType type;
+  final String? productCode;
   final String? executableName;
   final String? displayName;
 
@@ -21,6 +22,7 @@ class GameClient {
     required this.version,
     required this.build,
     required this.type,
+    this.productCode,
     this.executableName,
     this.displayName,
   });
@@ -31,6 +33,7 @@ class GameClient {
     'version': version,
     'build': build,
     'type': type.name,
+    'productCode': productCode,
     'executableName': executableName,
     'displayName': displayName,
   };
@@ -41,17 +44,25 @@ class GameClient {
     version: json['version'],
     build: json['build'],
     type: ClientType.values.firstWhere((e) => e.name == json['type']),
+    productCode: json['productCode'],
     executableName: json['executableName'],
     displayName: json['displayName'],
   );
 
-  GameClient copyWith({String? displayName}) {
+  GameClient copyWith({
+    String? displayName,
+    String? version,
+    String? build,
+    ClientType? type,
+    String? productCode,
+  }) {
     return GameClient(
       id: id,
       path: path,
-      version: version,
-      build: build,
-      type: type,
+      version: version ?? this.version,
+      build: build ?? this.build,
+      type: type ?? this.type,
+      productCode: productCode ?? this.productCode,
       executableName: executableName,
       displayName: displayName ?? this.displayName,
     );

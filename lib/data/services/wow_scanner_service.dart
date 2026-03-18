@@ -1,170 +1,465 @@
-import 'dart:io';
 import 'dart:ffi';
+import 'dart:io';
+
 import 'package:ffi/ffi.dart';
-import 'package:win32/win32.dart';
 import 'package:path/path.dart' as p;
+import 'package:win32/win32.dart';
+import 'package:wow_qaddons_manager/core/utils/wow_version_profile.dart';
 import 'package:wow_qaddons_manager/domain/models/game_client.dart';
 
 class WoWScannerService {
-  /// Ищет все потенциальные исполняемые файлы WoW в директории
   Future<List<GameClient>> scanDirectory(String path) async {
     final dir = Directory(path);
-    if (!await dir.exists()) return [];
+    if (!await dir.exists()) {
+      return [];
+    }
 
-    // 1. Проверяем наличие папки Data или .build.info
     final dataDir = Directory(p.join(path, 'Data'));
     final buildInfo = File(p.join(path, '.build.info'));
-    
+    final addonsDir = Directory(p.join(path, 'Interface', 'AddOns'));
+
     final hasData = await dataDir.exists();
     final hasBuildInfo = await buildInfo.exists();
+    final hasAddonsDir = await addonsDir.exists();
 
-    if (!hasData && !hasBuildInfo) {
+    if (!hasData && !hasBuildInfo && !hasAddonsDir) {
       throw Exception('MISSING_DATA');
     }
 
-    final List<File> exes = [];
+    final executables = await _findExecutableCandidates(dir);
+    final buildEntries = await _readBuildInfoEntries(path);
+    final foundClients = <GameClient>[];
 
-    try {
-      final List<FileSystemEntity> entities = await dir.list().toList();
-      for (var entity in entities) {
-        if (entity is File && entity.path.toLowerCase().endsWith('.exe')) {
-          final name = p.basename(entity.path).toLowerCase();
-          if (name.contains('wow') || name.contains('world of warcraft')) {
-            exes.add(entity);
-          }
-        }
-      }
-    } catch (e) {
-      throw Exception('READ_ERROR');
-    }
+    for (final executable in executables) {
+      final exeName = p.basename(executable.path);
 
-    if (exes.isEmpty) {
-      throw Exception('MISSING_EXE');
-    }
-
-    final List<GameClient> foundClients = [];
-
-    // Для каждого найденного EXE пытаемся определить версию
-    for (final exe in exes) {
-      final exeName = p.basename(exe.path);
-      
-      // 1. Пытаемся через .build.info (для современных клиентов)
-      GameClient? client = await _parseBuildInfo(path, exeName);
-      
-      // 2. Если не вышло, пытаемся через метаданные Windows
-      if (Platform.isWindows) {
-        client ??= await _scanWindowsMetadata(path, exeName);
+      GameClient? client = _matchBuildEntryToExecutable(path, exeName, buildEntries);
+      if (client == null && Platform.isWindows) {
+        client = await _scanWindowsMetadata(path, executable);
       }
 
-      // 3. Если все еще не вышло, считаем его Legacy с неизвестной версией
-      client ??= GameClient(
-          id: DateTime.now().millisecondsSinceEpoch.toString() + exeName,
-          path: path,
-          version: 'Unknown',
-          build: '0',
-          type: ClientType.legacy,
-          executableName: exeName,
-          displayName: exeName.replaceAll('.exe', ''),
-        );
-
+      client ??= _inferClientFromName(path, exeName);
+      client ??= _buildLegacyFallbackClient(path, exeName: exeName);
       foundClients.add(client);
     }
 
-    return foundClients;
+    if (foundClients.isEmpty) {
+      for (final entry in buildEntries) {
+        foundClients.add(_buildClientFromBuildEntry(path, entry));
+      }
+    }
+
+    if (foundClients.isEmpty && (hasData || hasAddonsDir || hasBuildInfo)) {
+      foundClients.add(_buildLegacyFallbackClient(path));
+    }
+
+    final deduplicated = <String, GameClient>{};
+    for (final client in foundClients) {
+      final key = [
+        client.productCode ?? '',
+        client.executableName ?? '',
+        client.version,
+        client.path.toLowerCase(),
+      ].join('|');
+      deduplicated[key] = client;
+    }
+
+    if (deduplicated.isEmpty) {
+      throw Exception('MISSING_EXE');
+    }
+
+    return deduplicated.values.toList(growable: false);
   }
 
-  /// Чтение метаданных из конкретного EXE (Windows)
-  Future<GameClient?> _scanWindowsMetadata(String path, String exeName) async {
-    final exePath = p.join(path, exeName);
-    final file = File(exePath);
-    if (!await file.exists()) return null;
+  Future<List<File>> _findExecutableCandidates(Directory root) async {
+    final queue = <({Directory directory, int depth})>[(directory: root, depth: 0)];
+    final executables = <File>[];
 
-    try {
-      final lptstrFilename = exePath.toNativeUtf16();
-      final dwSize = GetFileVersionInfoSize(lptstrFilename, nullptr);
-      
-      if (dwSize > 0) {
-        final lpData = calloc<Uint8>(dwSize);
-        if (GetFileVersionInfo(lptstrFilename, 0, dwSize, lpData) != 0) {
-          final lpSubBlock = r'\'.toNativeUtf16();
-          final lplpBuffer = calloc<Pointer>();
-          final puLen = calloc<Uint32>();
+    while (queue.isNotEmpty) {
+      final current = queue.removeAt(0);
+      final entities = await current.directory.list().toList();
 
-          if (VerQueryValue(lpData, lpSubBlock, lplpBuffer, puLen) != 0) {
-            final fileInfo = lplpBuffer.value.cast<VS_FIXEDFILEINFO>().ref;
-            
-            final version = '${fileInfo.dwFileVersionMS >> 16}.'
-                          '${fileInfo.dwFileVersionMS & 0xFFFF}.'
-                          '${fileInfo.dwFileVersionLS >> 16}';
-            final build = '${fileInfo.dwFileVersionLS & 0xFFFF}';
-
-            free(lptstrFilename);
-            free(lpData);
-            free(lpSubBlock);
-            free(lplpBuffer);
-            free(puLen);
-
-            ClientType type = ClientType.legacy;
-            if (version.startsWith('11.') || version.startsWith('10.')) type = ClientType.retail;
-            if (version.startsWith('3.')) type = ClientType.legacy; // WotLK
-
-            return GameClient(
-              id: DateTime.now().millisecondsSinceEpoch.toString() + exeName,
-              path: path,
-              version: version,
-              build: build,
-              type: type,
-              executableName: exeName,
-              displayName: exeName.replaceAll('.exe', ''),
-            );
+      for (final entity in entities) {
+        if (entity is File && entity.path.toLowerCase().endsWith('.exe')) {
+          final name = p.basename(entity.path).toLowerCase();
+          if (name.contains('wow') || name.contains('world of warcraft')) {
+            executables.add(entity);
           }
+          continue;
+        }
+
+        if (entity is Directory && current.depth < 2) {
+          final folderName = p.basename(entity.path).toLowerCase();
+          if (folderName == 'data' || folderName == 'interface' || folderName.startsWith('.')) {
+            continue;
+          }
+
+          queue.add((directory: entity, depth: current.depth + 1));
         }
       }
-    } catch (e) {
-      // Ошибка доступа к Win32 API
     }
-    return null;
+
+    executables.sort((a, b) => a.path.compareTo(b.path));
+    return executables;
   }
 
-  /// Парсинг .build.info (Retail/Classic)
-  Future<GameClient?> _parseBuildInfo(String path, String exeName) async {
+  Future<List<_BuildInfoEntry>> _readBuildInfoEntries(String path) async {
     final file = File(p.join(path, '.build.info'));
-    if (!await file.exists()) return null;
+    if (!await file.exists()) {
+      return const <_BuildInfoEntry>[];
+    }
 
     try {
-      final content = await file.readAsString();
-      final lines = content.split('\n').where((l) => l.trim().isNotEmpty).toList();
-      if (lines.length < 2) return null;
+      final lines = await file.readAsLines();
+      final meaningfulLines = lines.where((line) => line.trim().isNotEmpty).toList();
+      if (meaningfulLines.length < 2) {
+        return const <_BuildInfoEntry>[];
+      }
 
-      final header = lines[0].split('|');
-      final data = lines[1].split('|');
+      final header = meaningfulLines.first.split('|').map((value) => value.trim()).toList();
+      final productIndex = header.indexWhere((value) => value.contains('Product'));
+      final versionIndex = header.indexWhere((value) => value.contains('Version'));
+      final buildIndex = header.indexWhere((value) => value.contains('Build'));
 
-      final versionIdx = header.indexWhere((h) => h.contains('Version'));
-      final buildIdx = header.indexWhere((h) => h.contains('Build'));
-      final productIdx = header.indexWhere((h) => h.contains('Product'));
+      if (productIndex == -1 && versionIndex == -1 && buildIndex == -1) {
+        return const <_BuildInfoEntry>[];
+      }
 
-      if (versionIdx != -1 && data.length > versionIdx) {
-        final version = data[versionIdx];
-        final build = buildIdx != -1 ? data[buildIdx] : '0';
-        final product = productIdx != -1 ? data[productIdx] : '';
+      final entries = <_BuildInfoEntry>[];
+      for (final line in meaningfulLines.skip(1)) {
+        final columns = line.split('|');
+        if (columns.isEmpty) {
+          continue;
+        }
 
-        ClientType type = ClientType.retail;
-        if (product.contains('wow_classic')) type = ClientType.classic;
-        if (product.contains('ptr')) type = ClientType.ptr;
+        final product = _readColumn(columns, productIndex)?.toLowerCase();
+        final version = _readColumn(columns, versionIndex);
+        final build = _readColumn(columns, buildIndex) ?? '0';
 
-        return GameClient(
-          id: DateTime.now().millisecondsSinceEpoch.toString() + exeName,
-          path: path,
-          version: version,
-          build: build,
-          type: type,
-          executableName: exeName,
-          displayName: 'World of Warcraft ($product)',
+        if (product == null || !product.startsWith('wow')) {
+          continue;
+        }
+
+        entries.add(
+          _BuildInfoEntry(
+            product: product,
+            version: version ?? 'Unknown',
+            build: build,
+          ),
         );
       }
-    } catch (e) {
-      // Ошибка парсинга или доступа
+
+      return entries;
+    } catch (_) {
+      return const <_BuildInfoEntry>[];
     }
+  }
+
+  String? _readColumn(List<String> columns, int index) {
+    if (index < 0 || index >= columns.length) {
+      return null;
+    }
+
+    final value = columns[index].trim();
+    return value.isEmpty ? null : value;
+  }
+
+  GameClient? _matchBuildEntryToExecutable(
+    String path,
+    String exeName,
+    List<_BuildInfoEntry> entries,
+  ) {
+    if (entries.isEmpty) {
+      return null;
+    }
+
+    final exeHint = exeName.toLowerCase();
+    final rankedEntries = entries.toList()
+      ..sort((a, b) => _scoreBuildEntryForExecutable(b, exeHint).compareTo(_scoreBuildEntryForExecutable(a, exeHint)));
+
+    final bestEntry = rankedEntries.first;
+    return _buildClientFromBuildEntry(path, bestEntry, exeName: exeName);
+  }
+
+  int _scoreBuildEntryForExecutable(_BuildInfoEntry entry, String exeHint) {
+    var score = 0;
+    final product = entry.product;
+
+    if (exeHint.contains('ptr') || exeHint.contains('xptr')) {
+      if (product.contains('ptr')) {
+        score += 80;
+      }
+    } else if (product.contains('ptr')) {
+      score -= 20;
+    }
+
+    if (exeHint.contains('classic')) {
+      if (product.contains('classic')) {
+        score += 60;
+      }
+    } else if (product == 'wow') {
+      score += 20;
+    }
+
+    if (exeHint.contains('era') && product.contains('era')) {
+      score += 40;
+    }
+
+    if (exeHint.contains('retail') && product == 'wow') {
+      score += 40;
+    }
+
+    return score;
+  }
+
+  Future<GameClient?> _scanWindowsMetadata(String rootPath, File executable) async {
+    if (!await executable.exists()) {
+      return null;
+    }
+
+    try {
+      final exePath = executable.path;
+      final exeName = p.basename(exePath);
+      final filenamePointer = exePath.toNativeUtf16();
+      final size = GetFileVersionInfoSize(filenamePointer, nullptr);
+
+      if (size > 0) {
+        final buffer = calloc<Uint8>(size);
+        if (GetFileVersionInfo(filenamePointer, 0, size, buffer) != 0) {
+          final subBlock = r'\'.toNativeUtf16();
+          final valuePointer = calloc<Pointer>();
+          final valueLength = calloc<Uint32>();
+
+          if (VerQueryValue(buffer, subBlock, valuePointer, valueLength) != 0) {
+            final fileInfo = valuePointer.value.cast<VS_FIXEDFILEINFO>().ref;
+            final version =
+                '${fileInfo.dwFileVersionMS >> 16}.'
+                '${fileInfo.dwFileVersionMS & 0xFFFF}.'
+                '${fileInfo.dwFileVersionLS >> 16}';
+            final build = '${fileInfo.dwFileVersionLS & 0xFFFF}';
+            final profile = WowVersionProfile.parse(version);
+
+            free(filenamePointer);
+            free(buffer);
+            free(subBlock);
+            free(valuePointer);
+            free(valueLength);
+
+            return GameClient(
+              id: _buildClientId(rootPath, exeName, version),
+              path: rootPath,
+              version: version,
+              build: build,
+              type: _clientTypeFromProfile(profile),
+              productCode: null,
+              executableName: exeName,
+              displayName: _buildDisplayName(version: version, executableName: exeName),
+            );
+          }
+
+          free(subBlock);
+          free(valuePointer);
+          free(valueLength);
+        }
+
+        free(buffer);
+      }
+
+      free(filenamePointer);
+    } catch (_) {
+      // Ignore Win32 metadata failures and fallback to other heuristics.
+    }
+
     return null;
   }
+
+  GameClient? _inferClientFromName(String path, String exeName) {
+    final combinedSource = '${p.basename(path)} $exeName'.toLowerCase();
+    final versionMatch = RegExp(r'(\d+\.\d+(?:\.\d+)?)').firstMatch(combinedSource);
+    var version = versionMatch?.group(1);
+    if (version == null) {
+      final hintedProfile = WowVersionProfile.parse(combinedSource);
+      if (hintedProfile.family == WowVersionFamily.unknown) {
+        return null;
+      }
+
+      version = _defaultVersionForSource(combinedSource, hintedProfile.family);
+      if (version == null) {
+        return null;
+      }
+    }
+
+    final profile = WowVersionProfile.parse(version);
+    if (profile.family == WowVersionFamily.unknown && versionMatch == null) {
+      return null;
+    }
+
+    return GameClient(
+      id: _buildClientId(path, exeName, version),
+      path: path,
+      version: version,
+      build: '0',
+      type: _clientTypeFromHints(combinedSource, profile),
+      productCode: null,
+      executableName: exeName,
+      displayName: _buildDisplayName(version: version, executableName: exeName),
+    );
+  }
+
+  GameClient _buildClientFromBuildEntry(
+    String path,
+    _BuildInfoEntry entry, {
+    String? exeName,
+  }) {
+    return GameClient(
+      id: _buildClientId(path, exeName ?? entry.product, entry.version),
+      path: path,
+      version: entry.version,
+      build: entry.build,
+      type: _clientTypeFromProduct(entry.product, entry.version),
+      productCode: entry.product,
+      executableName: exeName,
+      displayName: _buildProductDisplayName(entry.product, entry.version),
+    );
+  }
+
+  GameClient _buildLegacyFallbackClient(
+    String path, {
+    String? exeName,
+  }) {
+    final source = '${p.basename(path)} ${exeName ?? ''}'.toLowerCase();
+    var inferredVersion =
+        RegExp(r'(\d+\.\d+(?:\.\d+)?)').firstMatch(source)?.group(1);
+    if (inferredVersion == null) {
+      final hintedProfile = WowVersionProfile.parse(source);
+      inferredVersion = _defaultVersionForSource(source, hintedProfile.family);
+    }
+
+    inferredVersion ??= 'Unknown';
+    final profile = WowVersionProfile.parse(inferredVersion);
+
+    return GameClient(
+      id: _buildClientId(path, exeName ?? p.basename(path), inferredVersion),
+      path: path,
+      version: inferredVersion,
+      build: '0',
+      type: inferredVersion == 'Unknown'
+          ? ClientType.legacy
+          : _clientTypeFromHints(source, profile),
+      productCode: null,
+      executableName: exeName,
+      displayName: _buildDisplayName(version: inferredVersion, executableName: exeName),
+    );
+  }
+
+  ClientType _clientTypeFromProduct(String product, String version) {
+    final normalizedProduct = product.toLowerCase();
+    if (normalizedProduct.contains('ptr') || normalizedProduct.contains('xptr')) {
+      return ClientType.ptr;
+    }
+    if (normalizedProduct.contains('classic')) {
+      return ClientType.classic;
+    }
+    if (normalizedProduct == 'wow' || normalizedProduct == 'wow_beta') {
+      return ClientType.retail;
+    }
+
+    final profile = WowVersionProfile.parse(version);
+    if (profile.family == WowVersionFamily.battleForAzeroth ||
+        profile.family == WowVersionFamily.shadowlands ||
+        profile.family == WowVersionFamily.dragonflight ||
+        profile.family == WowVersionFamily.warWithin) {
+      return ClientType.retail;
+    }
+
+    return ClientType.legacy;
+  }
+
+  ClientType _clientTypeFromProfile(WowVersionProfile profile) {
+    return switch (profile.family) {
+      WowVersionFamily.battleForAzeroth ||
+      WowVersionFamily.shadowlands ||
+      WowVersionFamily.dragonflight ||
+      WowVersionFamily.warWithin => ClientType.retail,
+      WowVersionFamily.unknown => ClientType.legacy,
+      _ => ClientType.legacy,
+    };
+  }
+
+  ClientType _clientTypeFromHints(String source, WowVersionProfile profile) {
+    if (source.contains('ptr') || source.contains('xptr')) {
+      return ClientType.ptr;
+    }
+    if (source.contains('classic') || source.contains('era') || source.contains('sod')) {
+      return ClientType.classic;
+    }
+    if (source.contains('retail') || source.contains('live') || source.contains('mainline')) {
+      return ClientType.retail;
+    }
+    return _clientTypeFromProfile(profile);
+  }
+
+  String _buildProductDisplayName(String product, String version) {
+    return switch (product) {
+      'wow' => 'World of Warcraft Retail ($version)',
+      'wowt' => 'World of Warcraft PTR ($version)',
+      'wowxptr' => 'World of Warcraft PTR ($version)',
+      'wow_beta' => 'World of Warcraft Beta ($version)',
+      'wow_classic' => 'World of Warcraft Classic ($version)',
+      'wow_classic_ptr' => 'World of Warcraft Classic PTR ($version)',
+      'wow_classic_beta' => 'World of Warcraft Classic Beta ($version)',
+      'wow_classic_era' => 'World of Warcraft Classic Era ($version)',
+      'wow_classic_era_ptr' => 'World of Warcraft Classic Era PTR ($version)',
+      _ => 'World of Warcraft ($product • $version)',
+    };
+  }
+
+  String _buildDisplayName({
+    required String version,
+    String? executableName,
+  }) {
+    if (version == 'Unknown') {
+      return executableName?.replaceAll('.exe', '') ?? 'World of Warcraft';
+    }
+
+    return 'World of Warcraft $version';
+  }
+
+  String _buildClientId(String path, String seed, String version) {
+    return '${path.toLowerCase()}|${seed.toLowerCase()}|${version.toLowerCase()}';
+  }
+
+  String? _defaultVersionForSource(String source, WowVersionFamily family) {
+    return switch (family) {
+      WowVersionFamily.vanilla =>
+        source.contains('season of discovery') || source.contains('sod')
+            ? '1.15.0'
+            : source.contains('classic era') || source.contains('era')
+            ? '1.14.4'
+            : '1.12.1',
+      WowVersionFamily.burningCrusade => source.contains('classic') ? '2.5.4' : '2.4.3',
+      WowVersionFamily.wrath => source.contains('classic') ? '3.4.3' : '3.3.5',
+      WowVersionFamily.cataclysm => source.contains('classic') ? '4.4.0' : '4.3.4',
+      WowVersionFamily.mistsOfPandaria => '5.4.8',
+      WowVersionFamily.warlordsOfDraenor => '6.2.4',
+      WowVersionFamily.legion => '7.3.5',
+      WowVersionFamily.battleForAzeroth => '8.3.0',
+      WowVersionFamily.shadowlands => '9.2.7',
+      WowVersionFamily.dragonflight => '10.2.7',
+      WowVersionFamily.warWithin => '11.1.0',
+      WowVersionFamily.unknown => null,
+    };
+  }
+}
+
+class _BuildInfoEntry {
+  final String product;
+  final String version;
+  final String build;
+
+  const _BuildInfoEntry({
+    required this.product,
+    required this.version,
+    required this.build,
+  });
 }

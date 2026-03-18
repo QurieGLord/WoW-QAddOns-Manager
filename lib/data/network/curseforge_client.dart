@@ -9,7 +9,7 @@ class CurseForgeClient {
   static const int _searchPageSize = 20;
   static const int _discoveryPageSize = 50;
   static const int _historyPageSize = 200;
-  static const int _maxHistoryPages = 6;
+  static const int _maxHistoryPages = 10;
 
   final Dio _dio;
   final Map<String, Future<CfFile?>> _fileMatchCache =
@@ -38,10 +38,12 @@ class CurseForgeClient {
       final requestedVersion = gameVersion?.trim() ?? '';
       final profile = WowVersionProfile.parse(requestedVersion);
       final attempts = <String?>[
-        if (requestedVersion.isNotEmpty) requestedVersion,
-        if (profile.majorMinor.isNotEmpty &&
-            profile.majorMinor != requestedVersion)
-          profile.majorMinor,
+        if (requestedVersion.isNotEmpty &&
+            !profile.apiVersionCandidates.contains(
+              requestedVersion.toLowerCase(),
+            ))
+          requestedVersion,
+        ...profile.apiVersionCandidates,
         null,
       ];
 
@@ -81,10 +83,11 @@ class CurseForgeClient {
     try {
       final profile = WowVersionProfile.parse(requestedVersion);
       final attempts = <String>[
-        requestedVersion,
-        if (profile.majorMinor.isNotEmpty &&
-            profile.majorMinor != requestedVersion)
-          profile.majorMinor,
+        if (!profile.apiVersionCandidates.contains(
+          requestedVersion.toLowerCase(),
+        ))
+          requestedVersion,
+        ...profile.apiVersionCandidates,
       ];
 
       final modsById = <int, CfMod>{};
@@ -135,9 +138,8 @@ class CurseForgeClient {
 
       final targetedFiles = <int, CfFile>{};
       for (final version in <String>[
-        gameVersion,
-        if (profile.majorMinor.isNotEmpty && profile.majorMinor != gameVersion)
-          profile.majorMinor,
+        if (!profile.apiVersionCandidates.contains(gameVersion)) gameVersion,
+        ...profile.apiVersionCandidates,
       ]) {
         final files = await _fetchFiles(modId, gameVersion: version);
         for (final file in files) {
@@ -320,27 +322,84 @@ class CurseForgeClient {
   }
 
   int _scoreFile(CfFile file, WowVersionProfile profile) {
-    final metadata = <String>[
-      ...file.gameVersions,
+    final explicitVersions = file.gameVersions
+        .where((version) => version.trim().isNotEmpty)
+        .toList(growable: false);
+    final descriptiveMetadata = <String>[
       if (file.displayName != null) file.displayName!,
       file.fileName,
     ];
 
-    var score = profile.numericCompatibilityScore(metadata);
-    if (score == 0) {
+    final explicitScore = profile.numericCompatibilityScore(explicitVersions);
+    final descriptiveScore = profile.numericCompatibilityScore(
+      descriptiveMetadata,
+    );
+    final hasStrictExplicitMatch = explicitVersions.any(
+      (version) => _matchesRequestedBranch(version, profile),
+    );
+    final hasConflictingExplicitVersion = explicitVersions.any(
+      profile.containsConflictingVersionMarker,
+    );
+
+    if (hasConflictingExplicitVersion && !hasStrictExplicitMatch) {
       return 0;
     }
 
-    if (file.displayName != null &&
-        profile.containsRequestedVersion(file.displayName!)) {
-      score += 10;
+    var score = 0;
+    if (hasStrictExplicitMatch) {
+      score = explicitScore + 60;
+
+      if (explicitVersions.any(
+        (version) => _matchesExactVersion(version, profile),
+      )) {
+        score += 40;
+      } else {
+        score += 20;
+      }
+    } else if (explicitScore > 0) {
+      score = explicitScore + 25;
     }
 
-    if (profile.containsRequestedVersion(file.fileName)) {
-      score += 5;
+    if (descriptiveScore > 0) {
+      final descriptiveBonus =
+          (file.displayName != null &&
+              profile.containsRequestedVersion(file.displayName!))
+          ? 15
+          : profile.containsRequestedVersion(file.fileName)
+          ? 10
+          : 0;
+      score = score < descriptiveScore + descriptiveBonus
+          ? descriptiveScore + descriptiveBonus
+          : score + descriptiveBonus;
+    } else if (score == 0) {
+      final descriptiveHaystack = descriptiveMetadata.join(' ');
+      if (profile.containsKnownVersionMarker(descriptiveHaystack)) {
+        return 0;
+      }
     }
 
     return score;
+  }
+
+  bool _matchesRequestedBranch(String value, WowVersionProfile profile) {
+    final candidate = WowVersionProfile.parse(value);
+    if (candidate.hasNumericVersion &&
+        candidate.majorMinor == profile.majorMinor) {
+      return true;
+    }
+
+    return profile.numericCompatibilityScore(<String>[value]) >= 100 &&
+        !profile.containsConflictingVersionMarker(value);
+  }
+
+  bool _matchesExactVersion(String value, WowVersionProfile profile) {
+    if (profile.exactVersion == profile.majorMinor) {
+      return false;
+    }
+
+    final candidate = WowVersionProfile.parse(value);
+    return candidate.hasNumericVersion &&
+        candidate.exactVersion == profile.exactVersion;
   }
 
   Future<String?> _resolveDownloadUrl(int modId, CfFile file) async {

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -19,6 +18,10 @@ import 'package:wow_qaddons_manager/data/services/addon_installer_service.dart';
 import 'package:wow_qaddons_manager/data/services/addon_registry_service.dart';
 import 'package:wow_qaddons_manager/domain/models/addon_item.dart';
 import 'package:wow_qaddons_manager/domain/models/installed_addon.dart';
+
+const bool kShowPerformanceOverlay = bool.fromEnvironment(
+  'SHOW_PERFORMANCE_OVERLAY',
+);
 
 // Провайдеры
 final scannerServiceProvider = Provider((ref) => WoWScannerService());
@@ -228,16 +231,11 @@ final clientListProvider =
       return ClientListNotifier(ref.read(clientRepositoryProvider));
     });
 
-// SVG Assets
-class AppVectors {
-  static const String interface =
-      '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19 3H5C3.89 3 3 3.9 3 5V19C3 20.1 3.89 21 5 21H19C20.11 21 21 20.1 21 19V5C21 3.9 20.11 3 19 3ZM19 19H5V5H19V19ZM7 10H17V12H7V10ZM7 14H12V16H7V14ZM7 6H17V8H7V6Z" fill="currentColor"/></svg>';
-  static const String wow =
-      '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 6H3C1.9 6 1 6.9 1 8V18C1 19.1 1.9 20 3 20H21C22.1 20 23 19.1 23 18V8C23 6.9 22.1 6 21 6ZM21 18H3V8H21V18ZM6 15H8V17H6V15ZM10 15H12V17H10V15ZM14 15H16V17H14V15ZM18 15H20V17H18V15ZM6 11H8V13H6V11ZM10 11H12V13H10V11ZM14 11H16V13H14V11ZM18 11H20V13H18V11Z" fill="currentColor"/></svg>';
-  static const String downloads =
-      '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19 9H15V3H9V9H5L12 16L19 9ZM5 18V20H19V18H5Z" fill="currentColor"/></svg>';
-  static const String info =
-      '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 12 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM13 17H11V11H13V17ZM13 9H11V7H13V9Z" fill="currentColor"/></svg>';
+class AppIcons {
+  static const IconData interface = Icons.tune_rounded;
+  static const IconData wow = Icons.videogame_asset_rounded;
+  static const IconData downloads = Icons.download_rounded;
+  static const IconData info = Icons.info_rounded;
 }
 
 // Localization Stub
@@ -421,6 +419,7 @@ class MyApp extends ConsumerWidget {
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      showPerformanceOverlay: kShowPerformanceOverlay,
       title: AppLocalizationsStub.appTitle(settings.locale.languageCode),
       themeMode: settings.themeMode,
       theme: AppTheme.createTheme(Brightness.light, settings.seedColor),
@@ -525,16 +524,8 @@ class HomeScreen extends ConsumerWidget {
 
       if (manualVersion != null) {
         selectedClient = selectedClient.copyWith(
-          displayName: 'World of Warcraft $manualVersion',
-        );
-        selectedClient = GameClient(
-          id: selectedClient.id,
-          path: selectedClient.path,
           version: manualVersion,
-          build: selectedClient.build,
-          type: selectedClient.type,
-          executableName: selectedClient.executableName,
-          displayName: selectedClient.displayName,
+          displayName: 'World of Warcraft $manualVersion',
         );
       } else {
         return;
@@ -604,7 +595,7 @@ class HomeScreen extends ConsumerWidget {
               ),
               itemCount: clients.length,
               itemBuilder: (context, index) =>
-                  _ClientCard(client: clients[index]),
+                  RepaintBoundary(child: _ClientCard(client: clients[index])),
             ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _handleScan(context, ref, locale),
@@ -669,6 +660,7 @@ class _ClientCard extends ConsumerWidget {
 
     return Card(
       elevation: 0,
+      clipBehavior: Clip.antiAlias,
       color: colorScheme.surfaceContainer,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(28),
@@ -888,9 +880,9 @@ class _ClientDetailsNavBar extends StatelessWidget {
           ),
           boxShadow: [
             BoxShadow(
-              color: colorScheme.shadow.withValues(alpha: 0.1),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
+              color: colorScheme.shadow.withValues(alpha: 0.08),
+              blurRadius: 12,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
@@ -1241,167 +1233,174 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
                     final addon = addons[index];
                     final isSelected = _selectedIds.contains(addon.id);
 
-                    return Card(
-                      elevation: 0,
-                      clipBehavior: Clip.antiAlias,
-                      color: isSelected
-                          ? colorScheme.secondaryContainer.withValues(
-                              alpha: 0.55,
-                            )
-                          : colorScheme.surfaceContainerLow,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        side: BorderSide(
-                          color:
-                              (isSelected
-                                      ? colorScheme.secondary
-                                      : colorScheme.outlineVariant)
-                                  .withValues(alpha: 0.35),
+                    return RepaintBoundary(
+                      child: Card(
+                        elevation: 0,
+                        clipBehavior: Clip.antiAlias,
+                        color: isSelected
+                            ? colorScheme.secondaryContainer.withValues(
+                                alpha: 0.55,
+                              )
+                            : colorScheme.surfaceContainerLow,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          side: BorderSide(
+                            color:
+                                (isSelected
+                                        ? colorScheme.secondary
+                                        : colorScheme.outlineVariant)
+                                    .withValues(alpha: 0.35),
+                          ),
                         ),
-                      ),
-                      child: Theme(
-                        data: Theme.of(
-                          context,
-                        ).copyWith(dividerColor: Colors.transparent),
-                        child: ExpansionTile(
-                          backgroundColor: Colors.transparent,
-                          collapsedBackgroundColor: Colors.transparent,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          collapsedShape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          tilePadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          childrenPadding: const EdgeInsets.fromLTRB(
-                            20,
-                            0,
-                            20,
-                            16,
-                          ),
-                          leading: Checkbox(
-                            value: isSelected,
-                            onChanged: (_) => _toggleSelection(addon.id),
-                          ),
-                          title: GestureDetector(
-                            onLongPress: () => _toggleSelection(addon.id),
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  backgroundColor: addon.isManaged
-                                      ? colorScheme.primaryContainer
-                                      : colorScheme.secondaryContainer,
-                                  child: Icon(
-                                    addon.isManaged
-                                        ? Icons.cloud_done_rounded
-                                        : Icons.folder_rounded,
-                                    color: addon.isManaged
-                                        ? colorScheme.onPrimaryContainer
-                                        : colorScheme.onSecondaryContainer,
+                        child: Theme(
+                          data: Theme.of(
+                            context,
+                          ).copyWith(dividerColor: Colors.transparent),
+                          child: ExpansionTile(
+                            backgroundColor: Colors.transparent,
+                            collapsedBackgroundColor: Colors.transparent,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                            collapsedShape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                            tilePadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            childrenPadding: const EdgeInsets.fromLTRB(
+                              20,
+                              0,
+                              20,
+                              16,
+                            ),
+                            leading: Checkbox(
+                              value: isSelected,
+                              onChanged: (_) => _toggleSelection(addon.id),
+                            ),
+                            title: GestureDetector(
+                              onLongPress: () => _toggleSelection(addon.id),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    backgroundColor: addon.isManaged
+                                        ? colorScheme.primaryContainer
+                                        : colorScheme.secondaryContainer,
+                                    child: Icon(
+                                      addon.isManaged
+                                          ? Icons.cloud_done_rounded
+                                          : Icons.folder_rounded,
+                                      color: addon.isManaged
+                                          ? colorScheme.onPrimaryContainer
+                                          : colorScheme.onSecondaryContainer,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 14),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        addon.displayName,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleMedium
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Wrap(
-                                        spacing: 8,
-                                        runSpacing: 8,
-                                        children: [
-                                          _InfoChip(
-                                            icon: Icons.folder_copy_outlined,
-                                            label:
-                                                AppLocalizationsStub.addonFolders(
-                                                  locale,
-                                                  addon.installedFolders.length,
-                                                ),
-                                          ),
-                                          _InfoChip(
-                                            icon: addon.isManaged
-                                                ? Icons.link_rounded
-                                                : Icons
-                                                      .home_repair_service_rounded,
-                                            label:
-                                                addon.providerName ??
-                                                AppLocalizationsStub.localManual(
-                                                  locale,
-                                                ),
-                                          ),
-                                          if ((addon.version ?? '').isNotEmpty)
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          addon.displayName,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleMedium
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Wrap(
+                                          spacing: 8,
+                                          runSpacing: 8,
+                                          children: [
                                             _InfoChip(
-                                              icon: Icons.sell_outlined,
-                                              label: addon.version!,
+                                              icon: Icons.folder_copy_outlined,
+                                              label:
+                                                  AppLocalizationsStub.addonFolders(
+                                                    locale,
+                                                    addon
+                                                        .installedFolders
+                                                        .length,
+                                                  ),
                                             ),
-                                        ],
+                                            _InfoChip(
+                                              icon: addon.isManaged
+                                                  ? Icons.link_rounded
+                                                  : Icons
+                                                        .home_repair_service_rounded,
+                                              label:
+                                                  addon.providerName ??
+                                                  AppLocalizationsStub.localManual(
+                                                    locale,
+                                                  ),
+                                            ),
+                                            if ((addon.version ?? '')
+                                                .isNotEmpty)
+                                              _InfoChip(
+                                                icon: Icons.sell_outlined,
+                                                label: addon.version!,
+                                              ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            children: [
+                              for (final folderName in addon.installedFolders)
+                                Container(
+                                  margin: const EdgeInsets.only(top: 8),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 12,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: colorScheme.surfaceContainerHighest
+                                        .withValues(alpha: 0.55),
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.subdirectory_arrow_right_rounded,
+                                        color: colorScheme.primary,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Text(
+                                          folderName,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodyMedium
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                        ),
                                       ),
                                     ],
                                   ),
                                 ),
-                              ],
-                            ),
+                              const SizedBox(height: 12),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: FilledButton.tonalIcon(
+                                  onPressed: () =>
+                                      _handleDeleteGroups([addon], locale),
+                                  icon: const Icon(
+                                    Icons.delete_outline_rounded,
+                                  ),
+                                  label: Text(
+                                    AppLocalizationsStub.delete(locale),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                          children: [
-                            for (final folderName in addon.installedFolders)
-                              Container(
-                                margin: const EdgeInsets.only(top: 8),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 12,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: colorScheme.surfaceContainerHighest
-                                      .withValues(alpha: 0.55),
-                                  borderRadius: BorderRadius.circular(18),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.subdirectory_arrow_right_rounded,
-                                      color: colorScheme.primary,
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Text(
-                                        folderName,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            const SizedBox(height: 12),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: FilledButton.tonalIcon(
-                                onPressed: () =>
-                                    _handleDeleteGroups([addon], locale),
-                                icon: const Icon(Icons.delete_outline_rounded),
-                                label: Text(
-                                  AppLocalizationsStub.delete(locale),
-                                ),
-                              ),
-                            ),
-                          ],
                         ),
                       ),
                     );
@@ -1805,40 +1804,42 @@ class _ClientHeader extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final locale = Localizations.localeOf(context).languageCode;
 
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(28),
-        ),
-        child: Row(
-          children: [
-            const AppLogoWidget(size: 48),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${AppLocalizationsStub.versionLabel(locale)} ${client.version}',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
+    return RepaintBoundary(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(28),
+          ),
+          child: Row(
+            children: [
+              const AppLogoWidget(size: 48),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${AppLocalizationsStub.versionLabel(locale)} ${client.version}',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                  Text(
-                    client.path,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
+                    Text(
+                      client.path,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1940,6 +1941,7 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
 
     return Card(
       elevation: 0,
+      clipBehavior: Clip.antiAlias,
       color: colorScheme.surfaceContainerLow,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
@@ -1960,7 +1962,10 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
                     widget.mod.thumbnailUrl ?? '',
                     width: 64,
                     height: 64,
+                    cacheWidth: 128,
+                    cacheHeight: 128,
                     fit: BoxFit.cover,
+                    filterQuality: FilterQuality.medium,
                     errorBuilder: (context, error, stackTrace) => Container(
                       width: 64,
                       height: 64,
@@ -2237,9 +2242,9 @@ class _FloatingNavBar extends StatelessWidget {
           ),
           boxShadow: [
             BoxShadow(
-              color: colorScheme.shadow.withValues(alpha: 0.1),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
+              color: colorScheme.shadow.withValues(alpha: 0.08),
+              blurRadius: 12,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
@@ -2247,22 +2252,22 @@ class _FloatingNavBar extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             _NavItem(
-              svg: AppVectors.interface,
+              icon: AppIcons.interface,
               isSelected: currentIndex == 0,
               onTap: () => onTap(0),
             ),
             _NavItem(
-              svg: AppVectors.wow,
+              icon: AppIcons.wow,
               isSelected: currentIndex == 1,
               onTap: () => onTap(1),
             ),
             _NavItem(
-              svg: AppVectors.downloads,
+              icon: AppIcons.downloads,
               isSelected: currentIndex == 2,
               onTap: () => onTap(2),
             ),
             _NavItem(
-              svg: AppVectors.info,
+              icon: AppIcons.info,
               isSelected: currentIndex == 3,
               onTap: () => onTap(3),
             ),
@@ -2274,12 +2279,12 @@ class _FloatingNavBar extends StatelessWidget {
 }
 
 class _NavItem extends StatelessWidget {
-  final String svg;
+  final IconData icon;
   final bool isSelected;
   final VoidCallback onTap;
 
   const _NavItem({
-    required this.svg,
+    required this.icon,
     required this.isSelected,
     required this.onTap,
   });
@@ -2294,8 +2299,6 @@ class _NavItem extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(32),
-          hoverColor: colorScheme.primary.withValues(alpha: 0.05),
-          highlightColor: colorScheme.primary.withValues(alpha: 0.1),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeInOutCubic,
@@ -2306,16 +2309,12 @@ class _NavItem extends StatelessWidget {
               borderRadius: BorderRadius.circular(32),
             ),
             child: Center(
-              child: SvgPicture.string(
-                svg,
-                width: 24,
-                height: 24,
-                colorFilter: ColorFilter.mode(
-                  isSelected
-                      ? colorScheme.onPrimary
-                      : colorScheme.onSurfaceVariant,
-                  BlendMode.srcIn,
-                ),
+              child: Icon(
+                icon,
+                size: 24,
+                color: isSelected
+                    ? colorScheme.onPrimary
+                    : colorScheme.onSurfaceVariant,
               ),
             ),
           ),
@@ -2421,9 +2420,9 @@ class _InterfaceSettingsView extends ConsumerWidget {
                     boxShadow: isSelected
                         ? [
                             BoxShadow(
-                              color: color.withValues(alpha: 0.4),
-                              blurRadius: 16,
-                              spreadRadius: 4,
+                              color: color.withValues(alpha: 0.28),
+                              blurRadius: 10,
+                              spreadRadius: 1.5,
                             ),
                           ]
                         : null,
