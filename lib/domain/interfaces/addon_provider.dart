@@ -21,4 +21,23 @@ abstract class IAddonProvider {
     AddonItem item,
     String gameVersion,
   );
+
+  Future<AddonItem?> verifyCandidate(
+    AddonItem item,
+    String gameVersion,
+  ) async {
+    if (item.hasVerifiedPayload) {
+      return item;
+    }
+
+    final info = await getDownloadUrl(item, gameVersion);
+    if (info == null || info.url.isEmpty || info.fileName.isEmpty) {
+      return null;
+    }
+
+    return item.copyWith(
+      verifiedDownloadUrl: info.url,
+      verifiedFileName: info.fileName,
+    );
+  }
 }

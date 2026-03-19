@@ -253,7 +253,11 @@ class WoWScannerService {
               type: _clientTypeFromProfile(profile),
               productCode: null,
               executableName: exeName,
-              displayName: _buildDisplayName(version: version, executableName: exeName),
+              displayName: GameClient.buildDisplayName(
+                version: version,
+                type: _clientTypeFromProfile(profile),
+                executableName: exeName,
+              ),
             );
           }
 
@@ -294,15 +298,21 @@ class WoWScannerService {
       return null;
     }
 
+    final inferredType = _clientTypeFromHints(combinedSource, profile);
+
     return GameClient(
       id: _buildClientId(path, exeName, version),
       path: path,
       version: version,
       build: '0',
-      type: _clientTypeFromHints(combinedSource, profile),
+      type: inferredType,
       productCode: null,
       executableName: exeName,
-      displayName: _buildDisplayName(version: version, executableName: exeName),
+      displayName: GameClient.buildDisplayName(
+        version: version,
+        type: inferredType,
+        executableName: exeName,
+      ),
     );
   }
 
@@ -311,15 +321,22 @@ class WoWScannerService {
     _BuildInfoEntry entry, {
     String? exeName,
   }) {
+    final clientType = _clientTypeFromProduct(entry.product, entry.version);
+
     return GameClient(
       id: _buildClientId(path, exeName ?? entry.product, entry.version),
       path: path,
       version: entry.version,
       build: entry.build,
-      type: _clientTypeFromProduct(entry.product, entry.version),
+      type: clientType,
       productCode: entry.product,
       executableName: exeName,
-      displayName: _buildProductDisplayName(entry.product, entry.version),
+      displayName: GameClient.buildDisplayName(
+        version: entry.version,
+        type: clientType,
+        productCode: entry.product,
+        executableName: exeName,
+      ),
     );
   }
 
@@ -337,53 +354,32 @@ class WoWScannerService {
 
     inferredVersion ??= 'Unknown';
     final profile = WowVersionProfile.parse(inferredVersion);
+    final clientType = inferredVersion == 'Unknown'
+        ? ClientType.legacy
+        : _clientTypeFromHints(source, profile);
 
     return GameClient(
       id: _buildClientId(path, exeName ?? p.basename(path), inferredVersion),
       path: path,
       version: inferredVersion,
       build: '0',
-      type: inferredVersion == 'Unknown'
-          ? ClientType.legacy
-          : _clientTypeFromHints(source, profile),
+      type: clientType,
       productCode: null,
       executableName: exeName,
-      displayName: _buildDisplayName(version: inferredVersion, executableName: exeName),
+      displayName: GameClient.buildDisplayName(
+        version: inferredVersion,
+        type: clientType,
+        executableName: exeName,
+      ),
     );
   }
 
   ClientType _clientTypeFromProduct(String product, String version) {
-    final normalizedProduct = product.toLowerCase();
-    if (normalizedProduct.contains('ptr') || normalizedProduct.contains('xptr')) {
-      return ClientType.ptr;
-    }
-    if (normalizedProduct.contains('classic')) {
-      return ClientType.classic;
-    }
-    if (normalizedProduct == 'wow' || normalizedProduct == 'wow_beta') {
-      return ClientType.retail;
-    }
-
-    final profile = WowVersionProfile.parse(version);
-    if (profile.family == WowVersionFamily.battleForAzeroth ||
-        profile.family == WowVersionFamily.shadowlands ||
-        profile.family == WowVersionFamily.dragonflight ||
-        profile.family == WowVersionFamily.warWithin) {
-      return ClientType.retail;
-    }
-
-    return ClientType.legacy;
+    return GameClient.inferTypeForVersion(version, productCode: product);
   }
 
   ClientType _clientTypeFromProfile(WowVersionProfile profile) {
-    return switch (profile.family) {
-      WowVersionFamily.battleForAzeroth ||
-      WowVersionFamily.shadowlands ||
-      WowVersionFamily.dragonflight ||
-      WowVersionFamily.warWithin => ClientType.retail,
-      WowVersionFamily.unknown => ClientType.legacy,
-      _ => ClientType.legacy,
-    };
+    return GameClient.inferTypeForVersion(profile.exactVersion);
   }
 
   ClientType _clientTypeFromHints(String source, WowVersionProfile profile) {
@@ -396,33 +392,10 @@ class WoWScannerService {
     if (source.contains('retail') || source.contains('live') || source.contains('mainline')) {
       return ClientType.retail;
     }
-    return _clientTypeFromProfile(profile);
-  }
-
-  String _buildProductDisplayName(String product, String version) {
-    return switch (product) {
-      'wow' => 'World of Warcraft Retail ($version)',
-      'wowt' => 'World of Warcraft PTR ($version)',
-      'wowxptr' => 'World of Warcraft PTR ($version)',
-      'wow_beta' => 'World of Warcraft Beta ($version)',
-      'wow_classic' => 'World of Warcraft Classic ($version)',
-      'wow_classic_ptr' => 'World of Warcraft Classic PTR ($version)',
-      'wow_classic_beta' => 'World of Warcraft Classic Beta ($version)',
-      'wow_classic_era' => 'World of Warcraft Classic Era ($version)',
-      'wow_classic_era_ptr' => 'World of Warcraft Classic Era PTR ($version)',
-      _ => 'World of Warcraft ($product • $version)',
-    };
-  }
-
-  String _buildDisplayName({
-    required String version,
-    String? executableName,
-  }) {
-    if (version == 'Unknown') {
-      return executableName?.replaceAll('.exe', '') ?? 'World of Warcraft';
-    }
-
-    return 'World of Warcraft $version';
+    return GameClient.inferTypeForVersion(
+      profile.exactVersion,
+      fallbackType: ClientType.legacy,
+    );
   }
 
   String _buildClientId(String path, String seed, String version) {

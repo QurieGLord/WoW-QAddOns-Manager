@@ -4,7 +4,7 @@ import 'package:wow_qaddons_manager/core/utils/wow_version_profile.dart';
 import 'package:wow_qaddons_manager/domain/interfaces/addon_provider.dart';
 import 'package:wow_qaddons_manager/domain/models/addon_item.dart';
 
-class GitHubProvider implements IAddonProvider {
+class GitHubProvider extends IAddonProvider {
   static const String staticProviderName = 'GitHub';
 
   final Dio _dio = Dio(
@@ -39,19 +39,19 @@ class GitHubProvider implements IAddonProvider {
     }
 
     try {
+      final searchQueries = _buildSearchQueries(normalizedQuery, profile);
+      final queryResults = await Future.wait(
+        searchQueries.map(_performSearch),
+      );
+
       final itemsByRepo = <String, Map<String, dynamic>>{};
-      for (final searchQuery in _buildSearchQueries(normalizedQuery, profile)) {
-        final items = await _performSearch(searchQuery);
+      for (final items in queryResults) {
         for (final item in items) {
           final fullName = _readString(item['full_name']);
           if (fullName == null) {
             continue;
           }
           itemsByRepo[fullName] = item;
-        }
-
-        if (itemsByRepo.length >= 16) {
-          break;
         }
       }
 
@@ -60,7 +60,8 @@ class GitHubProvider implements IAddonProvider {
           (a, b) => _scoreRepository(
             b,
             profile,
-          ).compareTo(_scoreRepository(a, profile)),
+            normalizedQuery,
+          ).compareTo(_scoreRepository(a, profile, normalizedQuery)),
         );
 
       final List<AddonItem> results = [];
@@ -157,7 +158,7 @@ class GitHubProvider implements IAddonProvider {
           'q': query,
           'sort': 'stars',
           'order': 'desc',
-          'per_page': 12,
+          'per_page': 20,
         },
       );
 
@@ -180,6 +181,13 @@ class GitHubProvider implements IAddonProvider {
     AddonItem item,
     String gameVersion,
   ) async {
+    if (item.hasVerifiedPayload) {
+      return (
+        url: item.verifiedDownloadUrl!,
+        fileName: item.verifiedFileName!,
+      );
+    }
+
     final profile = WowVersionProfile.parse(gameVersion);
 
     try {
@@ -208,6 +216,26 @@ class GitHubProvider implements IAddonProvider {
     }
 
     return _resolveBranchArchive(item.originalId.toString());
+  }
+
+  @override
+  Future<AddonItem?> verifyCandidate(
+    AddonItem item,
+    String gameVersion,
+  ) async {
+    if (item.hasVerifiedPayload) {
+      return item;
+    }
+
+    final info = await getDownloadUrl(item, gameVersion);
+    if (info == null || info.url.isEmpty || info.fileName.isEmpty) {
+      return null;
+    }
+
+    return item.copyWith(
+      verifiedDownloadUrl: info.url,
+      verifiedFileName: info.fileName,
+    );
   }
 
   Map<String, dynamic>? _selectBestZipAsset(
@@ -277,13 +305,12 @@ class GitHubProvider implements IAddonProvider {
     WowVersionProfile profile,
   ) {
     final haystack = '$name $description'.toLowerCase();
-    if (profile.containsConflictingVersionMarker(haystack)) {
-      return false;
+    if (_hasRequestedMarker(name, description, profile)) {
+      return true;
     }
 
-    final score = profile.numericCompatibilityScore([haystack]);
-    if (score >= 100) {
-      return true;
+    if (profile.containsConflictingVersionMarker(haystack)) {
+      return false;
     }
 
     return !profile.containsKnownVersionMarker(haystack);
@@ -292,21 +319,55 @@ class GitHubProvider implements IAddonProvider {
   int _scoreRepository(
     Map<String, dynamic> repository,
     WowVersionProfile profile,
+    String normalizedQuery,
   ) {
     final name = _readString(repository['name']) ?? '';
     final description = _readString(repository['description']) ?? '';
+    final fullName = _readString(repository['full_name']) ?? name;
     final haystack = '$name $description'.toLowerCase();
+    final hasRequestedMarker = _hasRequestedMarker(
+      name,
+      description,
+      profile,
+    );
 
-    if (profile.containsConflictingVersionMarker(haystack)) {
+    final compatibilityScore = profile.numericCompatibilityScore(<String>[
+      name,
+      description,
+    ]);
+
+    if (!hasRequestedMarker &&
+        compatibilityScore == 0 &&
+        profile.containsConflictingVersionMarker(haystack)) {
       return -200;
     }
 
-    final compatibilityScore = profile.numericCompatibilityScore([haystack]);
+    var score = _scoreQueryRelevance(name, description, normalizedQuery);
+    score += _scoreCanonicalRepository(name, fullName, normalizedQuery);
+
     if (compatibilityScore > 0) {
-      return compatibilityScore;
+      score += compatibilityScore * 2;
+    } else if (hasRequestedMarker) {
+      score += 140;
+    } else if (profile.containsKnownVersionMarker(haystack)) {
+      score -= 40;
     }
 
-    return profile.containsKnownVersionMarker(haystack) ? -40 : 10;
+    if (_looksLikeDerivativeRepository(name, normalizedQuery)) {
+      score -= 30;
+    }
+
+    if (_readBool(repository['archived'])) {
+      score -= 120;
+    }
+
+    final stars = repository['stargazers_count'];
+    if (stars is num) {
+      final starBonus = (stars / 250).floor();
+      score += starBonus > 30 ? 30 : starBonus;
+    }
+
+    return score;
   }
 
   Future<({String url, String fileName})?> _resolveBranchArchive(
@@ -375,5 +436,92 @@ class GitHubProvider implements IAddonProvider {
     }
 
     return stringValue;
+  }
+
+  bool _readBool(Object? value) {
+    return value is bool ? value : false;
+  }
+
+  bool _hasRequestedMarker(
+    String name,
+    String description,
+    WowVersionProfile profile,
+  ) {
+    return profile.containsRequestedVersion(name) ||
+        profile.containsRequestedVersion(description);
+  }
+
+  int _scoreQueryRelevance(
+    String name,
+    String description,
+    String query,
+  ) {
+    final normalizedName = _normalizeIdentity(name);
+    final normalizedDescription = _normalizeIdentity(description);
+    final normalizedQuery = _normalizeIdentity(query);
+    if (normalizedQuery.isEmpty) {
+      return 0;
+    }
+
+    if (normalizedName == normalizedQuery) {
+      return 260;
+    }
+    if (normalizedName.startsWith(normalizedQuery)) {
+      return 180;
+    }
+    if (normalizedName.contains(normalizedQuery)) {
+      return 120;
+    }
+    if (normalizedDescription.contains(normalizedQuery)) {
+      return 50;
+    }
+    return 0;
+  }
+
+  int _scoreCanonicalRepository(
+    String name,
+    String fullName,
+    String query,
+  ) {
+    final normalizedQuery = _normalizeIdentity(query);
+    if (normalizedQuery.isEmpty) {
+      return 0;
+    }
+
+    final normalizedName = _normalizeIdentity(name);
+    final normalizedSlug = _normalizeIdentity(fullName.split('/').last);
+    if (normalizedSlug == normalizedQuery) {
+      return 140;
+    }
+    if (normalizedName == normalizedQuery) {
+      return 120;
+    }
+    if (normalizedSlug.startsWith(normalizedQuery)) {
+      return 70;
+    }
+    return 0;
+  }
+
+  bool _looksLikeDerivativeRepository(String name, String query) {
+    final normalizedName = _normalizeIdentity(name);
+    final normalizedQuery = _normalizeIdentity(query);
+    if (normalizedQuery.isEmpty || normalizedName == normalizedQuery) {
+      return false;
+    }
+    if (!normalizedName.startsWith(normalizedQuery)) {
+      return false;
+    }
+
+    return RegExp(
+      r'(classic|era|bc|tbc|wrath|wotlk|cata|mop|bfa|retail|ptr|fork|continued|community|reborn|plus|edit|mod|edition)$',
+      caseSensitive: false,
+    ).hasMatch(normalizedName);
+  }
+
+  String _normalizeIdentity(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '')
+        .trim();
   }
 }

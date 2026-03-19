@@ -17,6 +17,7 @@ import 'package:wow_qaddons_manager/data/services/addon_search_service.dart';
 import 'package:wow_qaddons_manager/data/services/addon_installer_service.dart';
 import 'package:wow_qaddons_manager/data/services/addon_identity_service.dart';
 import 'package:wow_qaddons_manager/data/services/addon_registry_service.dart';
+import 'package:wow_qaddons_manager/domain/models/addon_feed_state.dart';
 import 'package:wow_qaddons_manager/domain/models/addon_item.dart';
 import 'package:wow_qaddons_manager/domain/models/installed_addon.dart';
 
@@ -127,23 +128,65 @@ final localAddonsProvider =
     });
 
 // Состояние поиска аддонов
-class SearchResultsNotifier extends StateNotifier<AsyncValue<List<AddonItem>>> {
+class SearchResultsNotifier extends StateNotifier<AddonFeedState> {
   final AddonSearchService _searchService;
-  SearchResultsNotifier(this._searchService) : super(const AsyncValue.data([]));
+  StreamSubscription<AddonFeedState>? _subscription;
+  int _requestToken = 0;
+
+  SearchResultsNotifier(this._searchService) : super(const AddonFeedState());
 
   Future<void> search(String query, {required String gameVersion}) async {
     if (query.isEmpty || gameVersion.trim().isEmpty) {
-      state = const AsyncValue.data([]);
+      await _subscription?.cancel();
+      state = const AddonFeedState();
       return;
     }
-    state = const AsyncValue.loading();
-    try {
-      // Провайдеры уже обернуты в catchError внутри сервиса, но добавим доп. защиту
-      final results = await _searchService.searchAll(query, gameVersion);
-      state = AsyncValue.data(results);
-    } catch (e, s) {
-      state = AsyncValue.error(e, s);
-    }
+
+    await _subscription?.cancel();
+    final requestToken = ++_requestToken;
+    final previousItems = state.items;
+    state = AddonFeedState(
+      items: previousItems,
+      isLoading: true,
+      targetCount: 12,
+    );
+
+    _subscription = _searchService
+        .watchSearchResults(query, gameVersion)
+        .listen(
+          (nextState) {
+            if (requestToken != _requestToken) {
+              return;
+            }
+
+            if (nextState.items.isEmpty &&
+                nextState.isLoading &&
+                previousItems.isNotEmpty) {
+              state = nextState.copyWith(items: previousItems);
+              return;
+            }
+
+            state = nextState;
+          },
+          onError: (error, stackTrace) {
+            if (requestToken != _requestToken) {
+              return;
+            }
+
+            state = AddonFeedState(
+              items: previousItems,
+              isLoading: false,
+              targetCount: 12,
+              error: error,
+            );
+          },
+        );
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
   }
 }
 
@@ -167,38 +210,76 @@ class _ClientSearchScopeKey {
   int get hashCode => Object.hash(clientId, gameVersion);
 }
 
-class DiscoveryFeedNotifier extends StateNotifier<AsyncValue<List<AddonItem>>> {
+class DiscoveryFeedNotifier extends StateNotifier<AddonFeedState> {
   final AddonSearchService _searchService;
   final String _gameVersion;
+  StreamSubscription<AddonFeedState>? _subscription;
+  int _requestToken = 0;
 
   DiscoveryFeedNotifier(this._searchService, this._gameVersion)
-    : super(const AsyncValue.loading()) {
+    : super(const AddonFeedState(isLoading: true, targetCount: 50)) {
     load();
   }
 
   Future<void> load() async {
     if (_gameVersion.trim().isEmpty) {
-      state = const AsyncValue.data([]);
+      await _subscription?.cancel();
+      state = const AddonFeedState();
       return;
     }
 
-    state = const AsyncValue.loading();
-    try {
-      final results = await _searchService.fetchDiscoveryFeed(
-        _gameVersion,
-        limit: 50,
-      );
-      state = AsyncValue.data(results);
-    } catch (e, s) {
-      state = AsyncValue.error(e, s);
-    }
+    await _subscription?.cancel();
+    final requestToken = ++_requestToken;
+    final previousItems = state.items;
+    state = AddonFeedState(
+      items: previousItems,
+      isLoading: true,
+      targetCount: 50,
+    );
+
+    _subscription = _searchService
+        .watchDiscoveryFeed(_gameVersion, limit: 50)
+        .listen(
+          (nextState) {
+            if (requestToken != _requestToken) {
+              return;
+            }
+
+            if (nextState.items.isEmpty &&
+                nextState.isLoading &&
+                previousItems.isNotEmpty) {
+              state = nextState.copyWith(items: previousItems);
+              return;
+            }
+
+            state = nextState;
+          },
+          onError: (error, stackTrace) {
+            if (requestToken != _requestToken) {
+              return;
+            }
+
+            state = AddonFeedState(
+              items: previousItems,
+              isLoading: false,
+              targetCount: 50,
+              error: error,
+            );
+          },
+        );
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
   }
 }
 
 final searchResultsProvider = StateNotifierProvider.autoDispose
     .family<
       SearchResultsNotifier,
-      AsyncValue<List<AddonItem>>,
+      AddonFeedState,
       _ClientSearchScopeKey
     >((ref, key) {
       return SearchResultsNotifier(ref.read(addonSearchServiceProvider));
@@ -207,7 +288,7 @@ final searchResultsProvider = StateNotifierProvider.autoDispose
 final discoveryFeedProvider = StateNotifierProvider.autoDispose
     .family<
       DiscoveryFeedNotifier,
-      AsyncValue<List<AddonItem>>,
+      AddonFeedState,
       _ClientSearchScopeKey
     >((ref, key) {
       return DiscoveryFeedNotifier(
@@ -341,6 +422,22 @@ class AppLocalizationsStub {
       locale == 'ru' ? 'Вручную' : 'Manual';
   static String clearSelection(String locale) =>
       locale == 'ru' ? 'Снять выбор' : 'Clear selection';
+  static String feedVerificationProgress(
+    String locale,
+    int verified,
+    int target,
+    int checked,
+    int total,
+  ) => locale == 'ru'
+      ? 'Проверено: $verified/$target, кандидатов: $checked/$total'
+      : 'Verified: $verified/$target, candidates: $checked/$total';
+  static String feedVerificationDone(
+    String locale,
+    int verified,
+    int total,
+  ) => locale == 'ru'
+      ? 'Доступно $verified подтвержденных результатов из $total кандидатов'
+      : '$verified verified results available from $total candidates';
 }
 
 Future<void> main() async {
@@ -539,9 +636,20 @@ class HomeScreen extends ConsumerWidget {
       );
 
       if (manualVersion != null) {
+        final inferredType = GameClient.inferTypeForVersion(
+          manualVersion,
+          productCode: selectedClient.productCode,
+          fallbackType: selectedClient.type,
+        );
         selectedClient = selectedClient.copyWith(
           version: manualVersion,
-          displayName: 'World of Warcraft $manualVersion',
+          type: inferredType,
+          displayName: GameClient.buildDisplayName(
+            version: manualVersion,
+            type: inferredType,
+            productCode: selectedClient.productCode,
+            executableName: selectedClient.executableName,
+          ),
         );
       } else {
         return;
@@ -730,7 +838,7 @@ class _ClientCard extends ConsumerWidget {
               ),
               const Spacer(),
               Text(
-                client.displayName ?? 'World of Warcraft',
+                client.resolvedDisplayName,
                 style: Theme.of(
                   context,
                 ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
@@ -806,7 +914,6 @@ class _ClientDetailsScreenState extends ConsumerState<ClientDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     final locale = ref.watch(appSettingsProvider).locale.languageCode;
-    final l10n = AppLocalizations.of(context)!;
     final isSelectionMode = _currentIndex == 0 && _selectedLocalAddons > 0;
 
     return Scaffold(
@@ -814,7 +921,7 @@ class _ClientDetailsScreenState extends ConsumerState<ClientDetailsScreen> {
         title: Text(
           isSelectionMode
               ? AppLocalizationsStub.selectedCount(locale, _selectedLocalAddons)
-              : (widget.client.displayName ?? l10n.clientDetailsTitle),
+              : widget.client.resolvedDisplayName,
         ),
         actions: [
           if (isSelectionMode) ...[
@@ -1564,6 +1671,70 @@ class _StatusMessage extends StatelessWidget {
   }
 }
 
+class _FeedVerificationStatusCard extends StatelessWidget {
+  final String locale;
+  final AddonFeedState feedState;
+
+  const _FeedVerificationStatusCard({
+    required this.locale,
+    required this.feedState,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final message = feedState.isLoading
+        ? AppLocalizationsStub.feedVerificationProgress(
+            locale,
+            feedState.items.length,
+            feedState.targetCount,
+            feedState.checkedCandidates,
+            feedState.totalCandidates,
+          )
+        : AppLocalizationsStub.feedVerificationDone(
+            locale,
+            feedState.items.length,
+            feedState.totalCandidates,
+          );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.28),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            message,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (feedState.isLoading && feedState.totalCandidates > 0) ...[
+            const SizedBox(height: 12),
+            LinearProgressIndicator(
+              value: feedState.checkedCandidates == 0
+                  ? null
+                  : feedState.progressValue > 1
+                  ? 1.0
+                  : feedState.progressValue,
+              minHeight: 6,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _FeedIntroCard extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -1678,56 +1849,53 @@ class _SearchAddonsViewState extends ConsumerState<_SearchAddonsView> {
 
   Widget _buildDiscoveryFeed() {
     final l10n = AppLocalizations.of(context)!;
+    final locale = ref.watch(appSettingsProvider).locale.languageCode;
     final discoveryFeed = ref.watch(discoveryFeedProvider(_scopeKey));
     final identityService = ref.watch(addonIdentityServiceProvider);
     final installedGroups =
         ref.watch(localAddonsProvider(widget.client)).valueOrNull ??
         const <InstalledAddonGroup>[];
 
-    return discoveryFeed.when(
-      data: (mods) {
-        if (mods.isEmpty) {
-          return _StatusMessage(
-            icon: Icons.travel_explore_rounded,
-            title: l10n.discoveryFeedEmptyTitle,
-            message: l10n.discoveryFeedEmptyMessage(widget.client.version),
-          );
-        }
-
-        return ListView.separated(
-          padding: const EdgeInsets.fromLTRB(24, 0, 24, 120),
-          itemCount: mods.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 12),
-          itemBuilder: (context, index) =>
-              AddonSearchResultTile(
-                mod: mods[index],
-                client: widget.client,
-                installedMatch: identityService.matchInstalledAddon(
-                  mods[index],
-                  installedGroups,
-                ),
-              ),
-        );
-      },
-      loading: () => _LoadingState(
-        label: l10n.discoveryFeedLoading(widget.client.version),
-      ),
-      error: (e, s) => _StatusMessage(
+    if (discoveryFeed.hasError && !discoveryFeed.hasResults) {
+      return _StatusMessage(
         icon: Icons.cloud_off_rounded,
         title: l10n.discoveryFeedErrorTitle,
         message: l10n.discoveryFeedErrorMessage(
           widget.client.version,
-          _formatError(e),
+          _formatError(discoveryFeed.error!),
         ),
         actionLabel: l10n.retryButton,
         onAction: () =>
             ref.read(discoveryFeedProvider(_scopeKey).notifier).load(),
-      ),
+      );
+    }
+
+    if (!discoveryFeed.hasResults && discoveryFeed.isLoading) {
+      return _LoadingState(
+        label: l10n.discoveryFeedLoading(widget.client.version),
+      );
+    }
+
+    if (!discoveryFeed.hasResults) {
+      return _StatusMessage(
+        icon: Icons.travel_explore_rounded,
+        title: l10n.discoveryFeedEmptyTitle,
+        message: l10n.discoveryFeedEmptyMessage(widget.client.version),
+      );
+    }
+
+    return _buildVerifiedFeedList(
+      feedState: discoveryFeed,
+      items: discoveryFeed.items,
+      installedGroups: installedGroups,
+      identityService: identityService,
+      locale: locale,
     );
   }
 
   Widget _buildSearchResults() {
     final l10n = AppLocalizations.of(context)!;
+    final locale = ref.watch(appSettingsProvider).locale.languageCode;
     final query = _normalizedQuery;
     final searchResults = ref.watch(searchResultsProvider(_scopeKey));
     final identityService = ref.watch(addonIdentityServiceProvider);
@@ -1735,41 +1903,71 @@ class _SearchAddonsViewState extends ConsumerState<_SearchAddonsView> {
         ref.watch(localAddonsProvider(widget.client)).valueOrNull ??
         const <InstalledAddonGroup>[];
 
-    return searchResults.when(
-      data: (mods) {
-        if (mods.isEmpty) {
-          return _StatusMessage(
-            icon: Icons.search_off_rounded,
-            title: l10n.searchNoResultsTitle,
-            message: l10n.searchNoResultsMessage(query, widget.client.version),
-          );
-        }
-
-        return ListView.separated(
-          padding: const EdgeInsets.fromLTRB(24, 0, 24, 120),
-          itemCount: mods.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 12),
-          itemBuilder: (context, index) =>
-              AddonSearchResultTile(
-                mod: mods[index],
-                client: widget.client,
-                installedMatch: identityService.matchInstalledAddon(
-                  mods[index],
-                  installedGroups,
-                ),
-              ),
-        );
-      },
-      loading: () => _LoadingState(label: l10n.searchLoading(query)),
-      error: (e, s) => _StatusMessage(
+    if (searchResults.hasError && !searchResults.hasResults) {
+      return _StatusMessage(
         icon: Icons.error_outline_rounded,
         title: l10n.searchErrorTitle,
-        message: l10n.searchErrorMessage(_formatError(e)),
+        message: l10n.searchErrorMessage(_formatError(searchResults.error!)),
         actionLabel: l10n.retryButton,
         onAction: () => ref
             .read(searchResultsProvider(_scopeKey).notifier)
             .search(query, gameVersion: widget.client.version),
-      ),
+      );
+    }
+
+    if (!searchResults.hasResults && searchResults.isLoading) {
+      return _LoadingState(label: l10n.searchLoading(query));
+    }
+
+    if (!searchResults.hasResults) {
+      return _StatusMessage(
+        icon: Icons.search_off_rounded,
+        title: l10n.searchNoResultsTitle,
+        message: l10n.searchNoResultsMessage(query, widget.client.version),
+      );
+    }
+
+    return _buildVerifiedFeedList(
+      feedState: searchResults,
+      items: searchResults.items,
+      installedGroups: installedGroups,
+      identityService: identityService,
+      locale: locale,
+    );
+  }
+
+  Widget _buildVerifiedFeedList({
+    required AddonFeedState feedState,
+    required List<AddonItem> items,
+    required List<InstalledAddonGroup> installedGroups,
+    required AddonIdentityService identityService,
+    required String locale,
+  }) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+          child: _FeedVerificationStatusCard(
+            locale: locale,
+            feedState: feedState,
+          ),
+        ),
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 120),
+            itemCount: items.length,
+            separatorBuilder: (context, index) => const SizedBox(height: 12),
+            itemBuilder: (context, index) => AddonSearchResultTile(
+              mod: items[index],
+              client: widget.client,
+              installedMatch: identityService.matchInstalledAddon(
+                items[index],
+                installedGroups,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

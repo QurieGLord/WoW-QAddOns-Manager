@@ -6,14 +6,17 @@ import 'package:wow_qaddons_manager/domain/models/curseforge/cf_file.dart';
 import 'package:wow_qaddons_manager/domain/models/curseforge/cf_mod.dart';
 
 class CurseForgeClient {
-  static const int _searchPageSize = 20;
+  static const int _searchPageSize = 40;
   static const int _discoveryPageSize = 50;
   static const int _historyPageSize = 200;
   static const int _maxHistoryPages = 10;
+  static const int _hintHistoryPages = 4;
 
   final Dio _dio;
   final Map<String, Future<CfFile?>> _fileMatchCache =
       <String, Future<CfFile?>>{};
+  final Map<String, Future<int>> _compatibilityHintCache =
+      <String, Future<int>>{};
 
   CurseForgeClient()
     : _dio = Dio(
@@ -47,18 +50,19 @@ class CurseForgeClient {
         null,
       ];
 
+      final responses = await Future.wait(
+        attempts.map(
+          (attemptVersion) => _searchModsRequest(
+            normalizedQuery,
+            gameVersion: attemptVersion,
+          ),
+        ),
+      );
+
       final modsById = <int, CfMod>{};
-      for (final attemptVersion in attempts) {
-        final mods = await _searchModsRequest(
-          normalizedQuery,
-          gameVersion: attemptVersion,
-        );
+      for (final mods in responses) {
         for (final mod in mods) {
           modsById.putIfAbsent(mod.id, () => mod);
-        }
-
-        if (modsById.length >= _searchPageSize) {
-          break;
         }
       }
 
@@ -91,20 +95,21 @@ class CurseForgeClient {
         null,
       ];
 
+      final responses = await Future.wait(
+        attempts.map(
+          (attemptVersion) => _searchModsRequest(
+            '',
+            gameVersion: attemptVersion,
+            pageSize: limit.clamp(1, _discoveryPageSize),
+            sortField: 2,
+          ),
+        ),
+      );
+
       final modsById = <int, CfMod>{};
-      for (final attemptVersion in attempts) {
-        final mods = await _searchModsRequest(
-          '',
-          gameVersion: attemptVersion,
-          pageSize: limit.clamp(1, _discoveryPageSize),
-          sortField: 2,
-        );
+      for (final mods in responses) {
         for (final mod in mods) {
           modsById.putIfAbsent(mod.id, () => mod);
-        }
-
-        if (modsById.length >= limit) {
-          break;
         }
       }
 
@@ -127,6 +132,76 @@ class CurseForgeClient {
     return _fileMatchCache.putIfAbsent(
       cacheKey,
       () => _loadLatestFileForVersion(modId, normalizedVersion),
+    );
+  }
+
+  CfFile? getPreviewFileForVersion(CfMod mod, String gameVersion) {
+    final normalizedVersion = gameVersion.trim().toLowerCase();
+    if (normalizedVersion.isEmpty) {
+      return null;
+    }
+
+    final profile = WowVersionProfile.parse(normalizedVersion);
+    final rankedCandidates = _rankCandidates(mod.latestFiles, profile);
+    return rankedCandidates.isEmpty ? null : rankedCandidates.first.file;
+  }
+
+  int getPreviewEvidenceScore(CfMod mod, String gameVersion) {
+    final normalizedVersion = gameVersion.trim().toLowerCase();
+    if (normalizedVersion.isEmpty) {
+      return 0;
+    }
+
+    final profile = WowVersionProfile.parse(normalizedVersion);
+    final previewFile = getPreviewFileForVersion(mod, normalizedVersion);
+    return previewFile == null ? 0 : _scoreFile(previewFile, profile);
+  }
+
+  int getMetadataCompatibilityScore(CfMod mod, String gameVersion) {
+    final normalizedVersion = gameVersion.trim().toLowerCase();
+    if (normalizedVersion.isEmpty) {
+      return 0;
+    }
+
+    final profile = WowVersionProfile.parse(normalizedVersion);
+    final metadataHaystack = '${mod.name} ${mod.summary}'.toLowerCase();
+    if (profile.containsConflictingVersionMarker(metadataHaystack)) {
+      return 0;
+    }
+
+    final metadataScore = profile.numericCompatibilityScore(<String>[
+      mod.name,
+      mod.summary,
+    ]);
+
+    if (metadataScore > 0) {
+      return metadataScore;
+    }
+
+    return profile.containsKnownVersionMarker(metadataHaystack) ? 0 : 10;
+  }
+
+  int getPreviewCompatibilityScore(CfMod mod, String gameVersion) {
+    final normalizedVersion = gameVersion.trim().toLowerCase();
+    if (normalizedVersion.isEmpty) {
+      return 0;
+    }
+
+    final previewScore = getPreviewEvidenceScore(mod, normalizedVersion);
+    final metadataScore = getMetadataCompatibilityScore(mod, normalizedVersion);
+    return previewScore > metadataScore ? previewScore : metadataScore;
+  }
+
+  Future<int> getCompatibilityHintScore(int modId, String gameVersion) {
+    final normalizedVersion = gameVersion.trim().toLowerCase();
+    if (normalizedVersion.isEmpty) {
+      return Future<int>.value(0);
+    }
+
+    final cacheKey = '$modId|$normalizedVersion|hint';
+    return _compatibilityHintCache.putIfAbsent(
+      cacheKey,
+      () => _loadCompatibilityHintScore(modId, normalizedVersion),
     );
   }
 
@@ -176,6 +251,56 @@ class CurseForgeClient {
         debugPrint('CurseForge File Match Error ($modId / $gameVersion): $e');
       }
       return null;
+    }
+  }
+
+  Future<int> _loadCompatibilityHintScore(int modId, String gameVersion) async {
+    try {
+      final profile = WowVersionProfile.parse(gameVersion);
+      var bestScore = 0;
+
+      final targetedFiles = <int, CfFile>{};
+      for (final version in <String>[
+        if (!profile.apiVersionCandidates.contains(gameVersion)) gameVersion,
+        ...profile.apiVersionCandidates,
+      ]) {
+        final files = await _fetchFiles(modId, gameVersion: version);
+        for (final file in files) {
+          targetedFiles[file.id] = file;
+        }
+      }
+
+      final targetedCandidates = _rankCandidates(targetedFiles.values, profile);
+      if (targetedCandidates.isNotEmpty) {
+        bestScore = targetedCandidates.first.score;
+        if (bestScore >= 100) {
+          return bestScore;
+        }
+      }
+
+      for (var page = 0; page < _hintHistoryPages; page++) {
+        final files = await _fetchFiles(modId, index: page * _historyPageSize);
+        if (files.isEmpty) {
+          break;
+        }
+
+        final rankedCandidates = _rankCandidates(files, profile);
+        if (rankedCandidates.isNotEmpty &&
+            rankedCandidates.first.score > bestScore) {
+          bestScore = rankedCandidates.first.score;
+          if (bestScore >= 100) {
+            return bestScore;
+          }
+        }
+
+        if (files.length < _historyPageSize) {
+          break;
+        }
+      }
+
+      return bestScore;
+    } catch (_) {
+      return 0;
     }
   }
 

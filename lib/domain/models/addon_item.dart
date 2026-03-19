@@ -9,6 +9,8 @@ class AddonItem {
   final String? sourceSlug;
   final List<String> identityHints;
   final String version;
+  final String? verifiedDownloadUrl;
+  final String? verifiedFileName;
 
   AddonItem({
     required this.id,
@@ -21,5 +23,44 @@ class AddonItem {
     this.sourceSlug,
     this.identityHints = const <String>[],
     this.version = 'N/A',
+    this.verifiedDownloadUrl,
+    this.verifiedFileName,
   });
+
+  bool get hasVerifiedPayload {
+    return verifiedDownloadUrl != null &&
+        verifiedDownloadUrl!.isNotEmpty &&
+        verifiedFileName != null &&
+        verifiedFileName!.isNotEmpty;
+  }
+
+  AddonItem copyWith({
+    String? id,
+    String? name,
+    String? summary,
+    String? author,
+    String? thumbnailUrl,
+    String? providerName,
+    dynamic originalId,
+    String? sourceSlug,
+    List<String>? identityHints,
+    String? version,
+    String? verifiedDownloadUrl,
+    String? verifiedFileName,
+  }) {
+    return AddonItem(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      summary: summary ?? this.summary,
+      author: author ?? this.author,
+      thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
+      providerName: providerName ?? this.providerName,
+      originalId: originalId ?? this.originalId,
+      sourceSlug: sourceSlug ?? this.sourceSlug,
+      identityHints: identityHints ?? this.identityHints,
+      version: version ?? this.version,
+      verifiedDownloadUrl: verifiedDownloadUrl ?? this.verifiedDownloadUrl,
+      verifiedFileName: verifiedFileName ?? this.verifiedFileName,
+    );
+  }
 }
