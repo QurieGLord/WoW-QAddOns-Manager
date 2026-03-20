@@ -24,7 +24,7 @@
       "version": {}
     }
   },
-  "discoveryFeedSubtitle": "This is a popularity feed from CurseForge for client version {version}, not a text search result.",
+  "discoveryFeedSubtitle": "This is a popularity feed from the available addon sources for client version {version}, not a text search result.",
   "@discoveryFeedSubtitle": {
     "placeholders": {
       "version": {}
@@ -45,7 +45,7 @@
     }
   },
   "discoveryFeedEmptyTitle": "No popular addons available",
-  "discoveryFeedEmptyMessage": "CurseForge didn't return a popular addons feed for client version {version}.",
+  "discoveryFeedEmptyMessage": "The available addon sources didn't return a popular addons feed for client version {version}.",
   "@discoveryFeedEmptyMessage": {
     "placeholders": {
       "version": {}

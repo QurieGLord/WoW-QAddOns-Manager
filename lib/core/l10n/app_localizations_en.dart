@@ -57,7 +57,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String discoveryFeedSubtitle(Object version) {
-    return 'This is a popularity feed from CurseForge for client version $version, not a text search result.';
+    return 'This is a popularity feed from the available addon sources for client version $version, not a text search result.';
   }
 
   @override
@@ -79,7 +79,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String discoveryFeedEmptyMessage(Object version) {
-    return 'CurseForge didn\'t return a popular addons feed for client version $version.';
+    return 'The available addon sources didn\'t return a popular addons feed for client version $version.';
   }
 
   @override

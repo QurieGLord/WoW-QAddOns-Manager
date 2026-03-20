@@ -34,6 +34,41 @@ class AddonItem {
         verifiedFileName!.isNotEmpty;
   }
 
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'id': id,
+    'name': name,
+    'summary': summary,
+    'author': author,
+    'thumbnailUrl': thumbnailUrl,
+    'providerName': providerName,
+    'originalId': originalId,
+    'sourceSlug': sourceSlug,
+    'identityHints': identityHints,
+    'version': version,
+    'verifiedDownloadUrl': verifiedDownloadUrl,
+    'verifiedFileName': verifiedFileName,
+  };
+
+  factory AddonItem.fromJson(Map<String, dynamic> json) {
+    return AddonItem(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      summary: json['summary'] as String,
+      author: json['author'] as String?,
+      thumbnailUrl: json['thumbnailUrl'] as String?,
+      providerName: json['providerName'] as String,
+      originalId: json['originalId'],
+      sourceSlug: json['sourceSlug'] as String?,
+      identityHints:
+          (json['identityHints'] as List<dynamic>? ?? const <dynamic>[])
+              .whereType<String>()
+              .toList(growable: false),
+      version: json['version'] as String? ?? 'N/A',
+      verifiedDownloadUrl: json['verifiedDownloadUrl'] as String?,
+      verifiedFileName: json['verifiedFileName'] as String?,
+    );
+  }
+
   AddonItem copyWith({
     String? id,
     String? name,

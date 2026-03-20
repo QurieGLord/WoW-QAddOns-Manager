@@ -1,3 +1,4 @@
+import 'package:wow_qaddons_manager/core/services/provider_request_context.dart';
 import 'package:wow_qaddons_manager/core/utils/wow_version_profile.dart';
 import 'package:wow_qaddons_manager/data/network/curseforge_client.dart';
 import 'package:wow_qaddons_manager/domain/interfaces/addon_provider.dart';
@@ -20,47 +21,59 @@ class CurseForgeProvider extends IAddonProvider {
 
   @override
   Future<List<AddonItem>> search(String query, String gameVersion) async {
+    return searchWithContext(query, gameVersion);
+  }
+
+  Future<List<AddonItem>> searchWithContext(
+    String query,
+    String gameVersion, {
+    ProviderRequestContext? requestContext,
+  }) async {
     final profile = WowVersionProfile.parse(gameVersion);
-    final mods = await _client.searchMods(query, gameVersion: gameVersion);
-    final rankedCandidates = mods
-        .map(
-          (mod) => (
-            mod: mod,
-            previewFile: _client.getPreviewFileForVersion(mod, gameVersion),
-            previewEvidenceScore: _client.getPreviewEvidenceScore(
-              mod,
-              gameVersion,
-            ),
-            metadataScore: _client.getMetadataCompatibilityScore(
-              mod,
-              gameVersion,
-            ),
-            queryScore: _scoreQueryMatch(mod, query),
-          ),
-        )
-        .where(
-          (candidate) =>
-              candidate.previewEvidenceScore > 0 ||
-              candidate.metadataScore > 0,
-        )
-        .where(
-          (candidate) => !_hasConflictingMetadata(
-            candidate.mod,
-            profile,
-            previewFile: candidate.previewFile,
-          ),
-        )
-        .toList()
-      ..sort(
-        (a, b) => (b.previewEvidenceScore * 2 +
-                b.metadataScore +
-                b.queryScore)
-            .compareTo(
-              a.previewEvidenceScore * 2 +
-                  a.metadataScore +
-                  a.queryScore,
-            ),
-      );
+    final mods = await _client.searchMods(
+      query,
+      gameVersion: gameVersion,
+      requestContext: requestContext,
+    );
+    final rankedCandidates =
+        mods
+            .map(
+              (mod) => (
+                mod: mod,
+                previewFile: _client.getPreviewFileForVersion(mod, gameVersion),
+                previewEvidenceScore: _client.getPreviewEvidenceScore(
+                  mod,
+                  gameVersion,
+                ),
+                metadataScore: _client.getMetadataCompatibilityScore(
+                  mod,
+                  gameVersion,
+                ),
+                queryScore: _scoreQueryMatch(mod, query),
+              ),
+            )
+            .where(
+              (candidate) =>
+                  candidate.previewEvidenceScore > 0 ||
+                  candidate.metadataScore > 0,
+            )
+            .where(
+              (candidate) => !_hasConflictingMetadata(
+                candidate.mod,
+                profile,
+                previewFile: candidate.previewFile,
+              ),
+            )
+            .toList()
+          ..sort(
+            (a, b) =>
+                (b.previewEvidenceScore * 2 + b.metadataScore + b.queryScore)
+                    .compareTo(
+                      a.previewEvidenceScore * 2 +
+                          a.metadataScore +
+                          a.queryScore,
+                    ),
+          );
 
     return rankedCandidates
         .take(40)
@@ -79,41 +92,54 @@ class CurseForgeProvider extends IAddonProvider {
     String gameVersion, {
     int limit = 50,
   }) async {
+    return fetchPopularAddonsWithContext(gameVersion, limit: limit);
+  }
+
+  Future<List<AddonItem>> fetchPopularAddonsWithContext(
+    String gameVersion, {
+    int limit = 50,
+    ProviderRequestContext? requestContext,
+  }) async {
     final profile = WowVersionProfile.parse(gameVersion);
-    final mods = await _client.fetchPopularMods(gameVersion, limit: limit);
-    final rankedCandidates = mods
-        .map(
-          (mod) => (
-            mod: mod,
-            previewFile: _client.getPreviewFileForVersion(mod, gameVersion),
-            previewEvidenceScore: _client.getPreviewEvidenceScore(
-              mod,
-              gameVersion,
+    final mods = await _client.fetchPopularMods(
+      gameVersion,
+      limit: limit,
+      requestContext: requestContext,
+    );
+    final rankedCandidates =
+        mods
+            .map(
+              (mod) => (
+                mod: mod,
+                previewFile: _client.getPreviewFileForVersion(mod, gameVersion),
+                previewEvidenceScore: _client.getPreviewEvidenceScore(
+                  mod,
+                  gameVersion,
+                ),
+                metadataScore: _client.getMetadataCompatibilityScore(
+                  mod,
+                  gameVersion,
+                ),
+              ),
+            )
+            .where(
+              (candidate) =>
+                  candidate.previewEvidenceScore > 0 ||
+                  candidate.metadataScore > 0,
+            )
+            .where(
+              (candidate) => !_hasConflictingMetadata(
+                candidate.mod,
+                profile,
+                previewFile: candidate.previewFile,
+              ),
+            )
+            .toList()
+          ..sort(
+            (a, b) => (b.previewEvidenceScore * 2 + b.metadataScore).compareTo(
+              a.previewEvidenceScore * 2 + a.metadataScore,
             ),
-            metadataScore: _client.getMetadataCompatibilityScore(
-              mod,
-              gameVersion,
-            ),
-          ),
-        )
-        .where(
-          (candidate) =>
-              candidate.previewEvidenceScore > 0 ||
-              candidate.metadataScore > 0,
-        )
-        .where(
-          (candidate) => !_hasConflictingMetadata(
-            candidate.mod,
-            profile,
-            previewFile: candidate.previewFile,
-          ),
-        )
-        .toList()
-      ..sort(
-        (a, b) => (b.previewEvidenceScore * 2 + b.metadataScore).compareTo(
-          a.previewEvidenceScore * 2 + a.metadataScore,
-        ),
-      );
+          );
 
     return rankedCandidates
         .take(limit)
@@ -132,16 +158,22 @@ class CurseForgeProvider extends IAddonProvider {
     AddonItem item,
     String gameVersion,
   ) async {
+    return getDownloadUrlWithContext(item, gameVersion);
+  }
+
+  Future<({String url, String fileName})?> getDownloadUrlWithContext(
+    AddonItem item,
+    String gameVersion, {
+    ProviderRequestContext? requestContext,
+  }) async {
     if (item.hasVerifiedPayload) {
-      return (
-        url: item.verifiedDownloadUrl!,
-        fileName: item.verifiedFileName!,
-      );
+      return (url: item.verifiedDownloadUrl!, fileName: item.verifiedFileName!);
     }
 
     final file = await _client.getLatestFileForVersion(
       item.originalId as int,
       gameVersion,
+      requestContext: requestContext,
     );
     if (file != null &&
         file.downloadUrl != null &&
@@ -152,10 +184,15 @@ class CurseForgeProvider extends IAddonProvider {
   }
 
   @override
-  Future<AddonItem?> verifyCandidate(
+  Future<AddonItem?> verifyCandidate(AddonItem item, String gameVersion) async {
+    return verifyCandidateWithContext(item, gameVersion);
+  }
+
+  Future<AddonItem?> verifyCandidateWithContext(
     AddonItem item,
-    String gameVersion,
-  ) async {
+    String gameVersion, {
+    ProviderRequestContext? requestContext,
+  }) async {
     if (item.hasVerifiedPayload) {
       return item;
     }
@@ -164,6 +201,7 @@ class CurseForgeProvider extends IAddonProvider {
     final file = await _client.getLatestFileForVersion(
       item.originalId as int,
       gameVersion,
+      requestContext: requestContext,
     );
     if (file == null ||
         file.downloadUrl == null ||
@@ -307,9 +345,9 @@ class CurseForgeProvider extends IAddonProvider {
             final scoreComparison = profile
                 .numericCompatibilityScore(<String>[b])
                 .compareTo(profile.numericCompatibilityScore(<String>[a]));
-        if (scoreComparison != 0) {
-          return scoreComparison;
-        }
+            if (scoreComparison != 0) {
+              return scoreComparison;
+            }
 
             final aProfile = WowVersionProfile.parse(a);
             final bProfile = WowVersionProfile.parse(b);

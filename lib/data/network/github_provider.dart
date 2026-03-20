@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
+import 'package:wow_qaddons_manager/core/services/provider_request_context.dart';
+import 'package:wow_qaddons_manager/core/utils/request_retry.dart';
 import 'package:wow_qaddons_manager/core/utils/wow_version_profile.dart';
 import 'package:wow_qaddons_manager/domain/interfaces/addon_provider.dart';
 import 'package:wow_qaddons_manager/domain/models/addon_item.dart';
@@ -31,6 +33,14 @@ class GitHubProvider extends IAddonProvider {
 
   @override
   Future<List<AddonItem>> search(String query, String gameVersion) async {
+    return searchWithContext(query, gameVersion);
+  }
+
+  Future<List<AddonItem>> searchWithContext(
+    String query,
+    String gameVersion, {
+    ProviderRequestContext? requestContext,
+  }) async {
     final normalizedQuery = query.trim();
     final profile = WowVersionProfile.parse(gameVersion);
 
@@ -41,7 +51,10 @@ class GitHubProvider extends IAddonProvider {
     try {
       final searchQueries = _buildSearchQueries(normalizedQuery, profile);
       final queryResults = await Future.wait(
-        searchQueries.map(_performSearch),
+        searchQueries.map(
+          (searchQuery) =>
+              _performSearch(searchQuery, requestContext: requestContext),
+        ),
       );
 
       final itemsByRepo = <String, Map<String, dynamic>>{};
@@ -98,11 +111,7 @@ class GitHubProvider extends IAddonProvider {
             providerName: providerName,
             originalId: fullName,
             sourceSlug: fullName.split('/').last,
-            identityHints: <String>[
-              name,
-              fullName,
-              fullName.split('/').last,
-            ],
+            identityHints: <String>[name, fullName, fullName.split('/').last],
             version: 'latest',
           ),
         );
@@ -150,16 +159,24 @@ class GitHubProvider extends IAddonProvider {
     return queries.toSet().toList(growable: false);
   }
 
-  Future<List<Map<String, dynamic>>> _performSearch(String query) async {
+  Future<List<Map<String, dynamic>>> _performSearch(
+    String query, {
+    ProviderRequestContext? requestContext,
+  }) async {
     try {
-      final response = await _dio.get(
-        '/search/repositories',
-        queryParameters: {
-          'q': query,
-          'sort': 'stars',
-          'order': 'desc',
-          'per_page': 20,
-        },
+      final response = await executeWithRetry<Response<dynamic>>(
+        requestContext: requestContext,
+        task: (cancelToken, timeout) => _dio.get(
+          '/search/repositories',
+          queryParameters: {
+            'q': query,
+            'sort': 'stars',
+            'order': 'desc',
+            'per_page': 20,
+          },
+          cancelToken: cancelToken,
+          options: Options(receiveTimeout: timeout, sendTimeout: timeout),
+        ),
       );
 
       final items = response.data is Map ? response.data['items'] : null;
@@ -181,18 +198,28 @@ class GitHubProvider extends IAddonProvider {
     AddonItem item,
     String gameVersion,
   ) async {
+    return getDownloadUrlWithContext(item, gameVersion);
+  }
+
+  Future<({String url, String fileName})?> getDownloadUrlWithContext(
+    AddonItem item,
+    String gameVersion, {
+    ProviderRequestContext? requestContext,
+  }) async {
     if (item.hasVerifiedPayload) {
-      return (
-        url: item.verifiedDownloadUrl!,
-        fileName: item.verifiedFileName!,
-      );
+      return (url: item.verifiedDownloadUrl!, fileName: item.verifiedFileName!);
     }
 
     final profile = WowVersionProfile.parse(gameVersion);
 
     try {
-      final response = await _dio.get(
-        '/repos/${item.originalId}/releases/latest',
+      final response = await executeWithRetry<Response<dynamic>>(
+        requestContext: requestContext,
+        task: (cancelToken, timeout) => _dio.get(
+          '/repos/${item.originalId}/releases/latest',
+          cancelToken: cancelToken,
+          options: Options(receiveTimeout: timeout, sendTimeout: timeout),
+        ),
       );
       final assets = response.data is Map ? response.data['assets'] : null;
       final asset = _selectBestZipAsset(assets, profile);
@@ -215,19 +242,31 @@ class GitHubProvider extends IAddonProvider {
       }
     }
 
-    return _resolveBranchArchive(item.originalId.toString());
+    return _resolveBranchArchive(
+      item.originalId.toString(),
+      requestContext: requestContext,
+    );
   }
 
   @override
-  Future<AddonItem?> verifyCandidate(
+  Future<AddonItem?> verifyCandidate(AddonItem item, String gameVersion) async {
+    return verifyCandidateWithContext(item, gameVersion);
+  }
+
+  Future<AddonItem?> verifyCandidateWithContext(
     AddonItem item,
-    String gameVersion,
-  ) async {
+    String gameVersion, {
+    ProviderRequestContext? requestContext,
+  }) async {
     if (item.hasVerifiedPayload) {
       return item;
     }
 
-    final info = await getDownloadUrl(item, gameVersion);
+    final info = await getDownloadUrlWithContext(
+      item,
+      gameVersion,
+      requestContext: requestContext,
+    );
     if (info == null || info.url.isEmpty || info.fileName.isEmpty) {
       return null;
     }
@@ -325,11 +364,7 @@ class GitHubProvider extends IAddonProvider {
     final description = _readString(repository['description']) ?? '';
     final fullName = _readString(repository['full_name']) ?? name;
     final haystack = '$name $description'.toLowerCase();
-    final hasRequestedMarker = _hasRequestedMarker(
-      name,
-      description,
-      profile,
-    );
+    final hasRequestedMarker = _hasRequestedMarker(name, description, profile);
 
     final compatibilityScore = profile.numericCompatibilityScore(<String>[
       name,
@@ -371,9 +406,13 @@ class GitHubProvider extends IAddonProvider {
   }
 
   Future<({String url, String fileName})?> _resolveBranchArchive(
-    String repository,
-  ) async {
-    final defaultBranch = await _fetchDefaultBranch(repository);
+    String repository, {
+    ProviderRequestContext? requestContext,
+  }) async {
+    final defaultBranch = await _fetchDefaultBranch(
+      repository,
+      requestContext: requestContext,
+    );
     final candidates = <String>[?defaultBranch, 'main', 'master'];
 
     final checkedBranches = <String>{};
@@ -386,7 +425,7 @@ class GitHubProvider extends IAddonProvider {
 
       final url =
           'https://github.com/$repository/archive/refs/heads/$branch.zip';
-      if (await _branchArchiveExists(url)) {
+      if (await _branchArchiveExists(url, requestContext: requestContext)) {
         return (url: url, fileName: '$repositoryName-$branch.zip');
       }
     }
@@ -394,9 +433,19 @@ class GitHubProvider extends IAddonProvider {
     return null;
   }
 
-  Future<String?> _fetchDefaultBranch(String repository) async {
+  Future<String?> _fetchDefaultBranch(
+    String repository, {
+    ProviderRequestContext? requestContext,
+  }) async {
     try {
-      final response = await _dio.get('/repos/$repository');
+      final response = await executeWithRetry<Response<dynamic>>(
+        requestContext: requestContext,
+        task: (cancelToken, timeout) => _dio.get(
+          '/repos/$repository',
+          cancelToken: cancelToken,
+          options: Options(receiveTimeout: timeout, sendTimeout: timeout),
+        ),
+      );
       if (response.data is! Map) {
         return null;
       }
@@ -408,13 +457,22 @@ class GitHubProvider extends IAddonProvider {
     }
   }
 
-  Future<bool> _branchArchiveExists(String url) async {
+  Future<bool> _branchArchiveExists(
+    String url, {
+    ProviderRequestContext? requestContext,
+  }) async {
     try {
-      final response = await _archiveDio.head(
-        url,
-        options: Options(
-          followRedirects: false,
-          validateStatus: (status) => status != null && status < 500,
+      final response = await executeWithRetry<Response<dynamic>>(
+        requestContext: requestContext,
+        task: (cancelToken, timeout) => _archiveDio.head(
+          url,
+          cancelToken: cancelToken,
+          options: Options(
+            followRedirects: false,
+            validateStatus: (status) => status != null && status < 500,
+            receiveTimeout: timeout,
+            sendTimeout: timeout,
+          ),
         ),
       );
 
@@ -451,11 +509,7 @@ class GitHubProvider extends IAddonProvider {
         profile.containsRequestedVersion(description);
   }
 
-  int _scoreQueryRelevance(
-    String name,
-    String description,
-    String query,
-  ) {
+  int _scoreQueryRelevance(String name, String description, String query) {
     final normalizedName = _normalizeIdentity(name);
     final normalizedDescription = _normalizeIdentity(description);
     final normalizedQuery = _normalizeIdentity(query);
@@ -478,11 +532,7 @@ class GitHubProvider extends IAddonProvider {
     return 0;
   }
 
-  int _scoreCanonicalRepository(
-    String name,
-    String fullName,
-    String query,
-  ) {
+  int _scoreCanonicalRepository(String name, String fullName, String query) {
     final normalizedQuery = _normalizeIdentity(query);
     if (normalizedQuery.isEmpty) {
       return 0;
@@ -519,9 +569,6 @@ class GitHubProvider extends IAddonProvider {
   }
 
   String _normalizeIdentity(String value) {
-    return value
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '')
-        .trim();
+    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '').trim();
   }
 }

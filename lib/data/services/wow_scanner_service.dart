@@ -33,7 +33,11 @@ class WoWScannerService {
     for (final executable in executables) {
       final exeName = p.basename(executable.path);
 
-      GameClient? client = _matchBuildEntryToExecutable(path, exeName, buildEntries);
+      GameClient? client = _matchBuildEntryToExecutable(
+        path,
+        exeName,
+        buildEntries,
+      );
       if (client == null && Platform.isWindows) {
         client = await _scanWindowsMetadata(path, executable);
       }
@@ -72,7 +76,9 @@ class WoWScannerService {
   }
 
   Future<List<File>> _findExecutableCandidates(Directory root) async {
-    final queue = <({Directory directory, int depth})>[(directory: root, depth: 0)];
+    final queue = <({Directory directory, int depth})>[
+      (directory: root, depth: 0),
+    ];
     final executables = <File>[];
 
     while (queue.isNotEmpty) {
@@ -90,7 +96,9 @@ class WoWScannerService {
 
         if (entity is Directory && current.depth < 2) {
           final folderName = p.basename(entity.path).toLowerCase();
-          if (folderName == 'data' || folderName == 'interface' || folderName.startsWith('.')) {
+          if (folderName == 'data' ||
+              folderName == 'interface' ||
+              folderName.startsWith('.')) {
             continue;
           }
 
@@ -111,14 +119,23 @@ class WoWScannerService {
 
     try {
       final lines = await file.readAsLines();
-      final meaningfulLines = lines.where((line) => line.trim().isNotEmpty).toList();
+      final meaningfulLines = lines
+          .where((line) => line.trim().isNotEmpty)
+          .toList();
       if (meaningfulLines.length < 2) {
         return const <_BuildInfoEntry>[];
       }
 
-      final header = meaningfulLines.first.split('|').map((value) => value.trim()).toList();
-      final productIndex = header.indexWhere((value) => value.contains('Product'));
-      final versionIndex = header.indexWhere((value) => value.contains('Version'));
+      final header = meaningfulLines.first
+          .split('|')
+          .map((value) => value.trim())
+          .toList();
+      final productIndex = header.indexWhere(
+        (value) => value.contains('Product'),
+      );
+      final versionIndex = header.indexWhere(
+        (value) => value.contains('Version'),
+      );
       final buildIndex = header.indexWhere((value) => value.contains('Build'));
 
       if (productIndex == -1 && versionIndex == -1 && buildIndex == -1) {
@@ -175,7 +192,12 @@ class WoWScannerService {
 
     final exeHint = exeName.toLowerCase();
     final rankedEntries = entries.toList()
-      ..sort((a, b) => _scoreBuildEntryForExecutable(b, exeHint).compareTo(_scoreBuildEntryForExecutable(a, exeHint)));
+      ..sort(
+        (a, b) => _scoreBuildEntryForExecutable(
+          b,
+          exeHint,
+        ).compareTo(_scoreBuildEntryForExecutable(a, exeHint)),
+      );
 
     final bestEntry = rankedEntries.first;
     return _buildClientFromBuildEntry(path, bestEntry, exeName: exeName);
@@ -212,7 +234,10 @@ class WoWScannerService {
     return score;
   }
 
-  Future<GameClient?> _scanWindowsMetadata(String rootPath, File executable) async {
+  Future<GameClient?> _scanWindowsMetadata(
+    String rootPath,
+    File executable,
+  ) async {
     if (!await executable.exists()) {
       return null;
     }
@@ -253,11 +278,7 @@ class WoWScannerService {
               type: _clientTypeFromProfile(profile),
               productCode: null,
               executableName: exeName,
-              displayName: GameClient.buildDisplayName(
-                version: version,
-                type: _clientTypeFromProfile(profile),
-                executableName: exeName,
-              ),
+              displayName: null,
             );
           }
 
@@ -279,7 +300,9 @@ class WoWScannerService {
 
   GameClient? _inferClientFromName(String path, String exeName) {
     final combinedSource = '${p.basename(path)} $exeName'.toLowerCase();
-    final versionMatch = RegExp(r'(\d+\.\d+(?:\.\d+)?)').firstMatch(combinedSource);
+    final versionMatch = RegExp(
+      r'(\d+\.\d+(?:\.\d+)?)',
+    ).firstMatch(combinedSource);
     var version = versionMatch?.group(1);
     if (version == null) {
       final hintedProfile = WowVersionProfile.parse(combinedSource);
@@ -308,11 +331,7 @@ class WoWScannerService {
       type: inferredType,
       productCode: null,
       executableName: exeName,
-      displayName: GameClient.buildDisplayName(
-        version: version,
-        type: inferredType,
-        executableName: exeName,
-      ),
+      displayName: null,
     );
   }
 
@@ -331,22 +350,15 @@ class WoWScannerService {
       type: clientType,
       productCode: entry.product,
       executableName: exeName,
-      displayName: GameClient.buildDisplayName(
-        version: entry.version,
-        type: clientType,
-        productCode: entry.product,
-        executableName: exeName,
-      ),
+      displayName: null,
     );
   }
 
-  GameClient _buildLegacyFallbackClient(
-    String path, {
-    String? exeName,
-  }) {
+  GameClient _buildLegacyFallbackClient(String path, {String? exeName}) {
     final source = '${p.basename(path)} ${exeName ?? ''}'.toLowerCase();
-    var inferredVersion =
-        RegExp(r'(\d+\.\d+(?:\.\d+)?)').firstMatch(source)?.group(1);
+    var inferredVersion = RegExp(
+      r'(\d+\.\d+(?:\.\d+)?)',
+    ).firstMatch(source)?.group(1);
     if (inferredVersion == null) {
       final hintedProfile = WowVersionProfile.parse(source);
       inferredVersion = _defaultVersionForSource(source, hintedProfile.family);
@@ -366,11 +378,7 @@ class WoWScannerService {
       type: clientType,
       productCode: null,
       executableName: exeName,
-      displayName: GameClient.buildDisplayName(
-        version: inferredVersion,
-        type: clientType,
-        executableName: exeName,
-      ),
+      displayName: null,
     );
   }
 
@@ -386,10 +394,14 @@ class WoWScannerService {
     if (source.contains('ptr') || source.contains('xptr')) {
       return ClientType.ptr;
     }
-    if (source.contains('classic') || source.contains('era') || source.contains('sod')) {
+    if (source.contains('classic') ||
+        source.contains('era') ||
+        source.contains('sod')) {
       return ClientType.classic;
     }
-    if (source.contains('retail') || source.contains('live') || source.contains('mainline')) {
+    if (source.contains('retail') ||
+        source.contains('live') ||
+        source.contains('mainline')) {
       return ClientType.retail;
     }
     return GameClient.inferTypeForVersion(
@@ -410,9 +422,11 @@ class WoWScannerService {
             : source.contains('classic era') || source.contains('era')
             ? '1.14.4'
             : '1.12.1',
-      WowVersionFamily.burningCrusade => source.contains('classic') ? '2.5.4' : '2.4.3',
+      WowVersionFamily.burningCrusade =>
+        source.contains('classic') ? '2.5.4' : '2.4.3',
       WowVersionFamily.wrath => source.contains('classic') ? '3.4.3' : '3.3.5',
-      WowVersionFamily.cataclysm => source.contains('classic') ? '4.4.0' : '4.3.4',
+      WowVersionFamily.cataclysm =>
+        source.contains('classic') ? '4.4.0' : '4.3.4',
       WowVersionFamily.mistsOfPandaria => '5.4.8',
       WowVersionFamily.warlordsOfDraenor => '6.2.4',
       WowVersionFamily.legion => '7.3.5',

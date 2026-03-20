@@ -1,6 +1,8 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:wow_qaddons_manager/core/services/provider_request_context.dart';
+import 'package:wow_qaddons_manager/core/utils/request_retry.dart';
 import 'package:wow_qaddons_manager/core/utils/wow_version_profile.dart';
 import 'package:wow_qaddons_manager/domain/models/curseforge/cf_file.dart';
 import 'package:wow_qaddons_manager/domain/models/curseforge/cf_mod.dart';
@@ -31,7 +33,11 @@ class CurseForgeClient {
         ),
       );
 
-  Future<List<CfMod>> searchMods(String query, {String? gameVersion}) async {
+  Future<List<CfMod>> searchMods(
+    String query, {
+    String? gameVersion,
+    ProviderRequestContext? requestContext,
+  }) async {
     final normalizedQuery = query.trim();
     if (normalizedQuery.isEmpty) {
       return const <CfMod>[];
@@ -55,6 +61,7 @@ class CurseForgeClient {
           (attemptVersion) => _searchModsRequest(
             normalizedQuery,
             gameVersion: attemptVersion,
+            requestContext: requestContext,
           ),
         ),
       );
@@ -78,6 +85,7 @@ class CurseForgeClient {
   Future<List<CfMod>> fetchPopularMods(
     String gameVersion, {
     int limit = _discoveryPageSize,
+    ProviderRequestContext? requestContext,
   }) async {
     final requestedVersion = gameVersion.trim();
     if (requestedVersion.isEmpty) {
@@ -102,6 +110,7 @@ class CurseForgeClient {
             gameVersion: attemptVersion,
             pageSize: limit.clamp(1, _discoveryPageSize),
             sortField: 2,
+            requestContext: requestContext,
           ),
         ),
       );
@@ -122,7 +131,11 @@ class CurseForgeClient {
     }
   }
 
-  Future<CfFile?> getLatestFileForVersion(int modId, String gameVersion) {
+  Future<CfFile?> getLatestFileForVersion(
+    int modId,
+    String gameVersion, {
+    ProviderRequestContext? requestContext,
+  }) {
     final normalizedVersion = gameVersion.trim().toLowerCase();
     if (normalizedVersion.isEmpty) {
       return Future<CfFile?>.value(null);
@@ -131,7 +144,11 @@ class CurseForgeClient {
     final cacheKey = '$modId|$normalizedVersion';
     return _fileMatchCache.putIfAbsent(
       cacheKey,
-      () => _loadLatestFileForVersion(modId, normalizedVersion),
+      () => _loadLatestFileForVersion(
+        modId,
+        normalizedVersion,
+        requestContext: requestContext,
+      ),
     );
   }
 
@@ -207,8 +224,9 @@ class CurseForgeClient {
 
   Future<CfFile?> _loadLatestFileForVersion(
     int modId,
-    String gameVersion,
-  ) async {
+    String gameVersion, {
+    ProviderRequestContext? requestContext,
+  }) async {
     try {
       final profile = WowVersionProfile.parse(gameVersion);
 
@@ -217,7 +235,11 @@ class CurseForgeClient {
         if (!profile.apiVersionCandidates.contains(gameVersion)) gameVersion,
         ...profile.apiVersionCandidates,
       ]) {
-        final files = await _fetchFiles(modId, gameVersion: version);
+        final files = await _fetchFiles(
+          modId,
+          gameVersion: version,
+          requestContext: requestContext,
+        );
         for (final file in files) {
           targetedFiles[file.id] = file;
         }
@@ -227,6 +249,7 @@ class CurseForgeClient {
         modId,
         targetedFiles.values,
         profile,
+        requestContext: requestContext,
       );
       final targetedScore = targetedMatch == null
           ? 0
@@ -235,7 +258,11 @@ class CurseForgeClient {
         return targetedMatch;
       }
 
-      final historicalMatch = await _scanHistoricalFiles(modId, profile);
+      final historicalMatch = await _scanHistoricalFiles(
+        modId,
+        profile,
+        requestContext: requestContext,
+      );
       if (historicalMatch == null) {
         return targetedMatch;
       }
@@ -309,6 +336,7 @@ class CurseForgeClient {
     String? gameVersion,
     int pageSize = _searchPageSize,
     int sortField = 2,
+    ProviderRequestContext? requestContext,
   }) async {
     final queryParams = <String, dynamic>{
       'gameId': 1,
@@ -326,9 +354,14 @@ class CurseForgeClient {
       queryParams['gameVersion'] = gameVersion;
     }
 
-    final response = await _dio.get(
-      '/v1/mods/search',
-      queryParameters: queryParams,
+    final response = await executeWithRetry<Response<dynamic>>(
+      requestContext: requestContext,
+      task: (cancelToken, timeout) => _dio.get(
+        '/v1/mods/search',
+        queryParameters: queryParams,
+        cancelToken: cancelToken,
+        options: Options(receiveTimeout: timeout, sendTimeout: timeout),
+      ),
     );
     return _readObjectList(
       response.data,
@@ -340,6 +373,7 @@ class CurseForgeClient {
     String? gameVersion,
     int pageSize = _historyPageSize,
     int index = 0,
+    ProviderRequestContext? requestContext,
   }) async {
     final queryParams = <String, dynamic>{'pageSize': pageSize, 'index': index};
 
@@ -347,9 +381,14 @@ class CurseForgeClient {
       queryParams['gameVersion'] = gameVersion;
     }
 
-    final response = await _dio.get(
-      '/v1/mods/$modId/files',
-      queryParameters: queryParams,
+    final response = await executeWithRetry<Response<dynamic>>(
+      requestContext: requestContext,
+      task: (cancelToken, timeout) => _dio.get(
+        '/v1/mods/$modId/files',
+        queryParameters: queryParams,
+        cancelToken: cancelToken,
+        options: Options(receiveTimeout: timeout, sendTimeout: timeout),
+      ),
     );
     return _readObjectList(
       response.data,
@@ -358,14 +397,19 @@ class CurseForgeClient {
 
   Future<CfFile?> _scanHistoricalFiles(
     int modId,
-    WowVersionProfile profile,
-  ) async {
+    WowVersionProfile profile, {
+    ProviderRequestContext? requestContext,
+  }) async {
     CfFile? bestMatch;
     var bestScore = 0;
 
     for (var page = 0; page < _maxHistoryPages; page++) {
       final index = page * _historyPageSize;
-      final files = await _fetchFiles(modId, index: index);
+      final files = await _fetchFiles(
+        modId,
+        index: index,
+        requestContext: requestContext,
+      );
       if (files.isEmpty) {
         break;
       }
@@ -376,6 +420,7 @@ class CurseForgeClient {
         final pageMatch = await _resolveRankedCandidates(
           modId,
           rankedCandidates,
+          requestContext: requestContext,
         );
         if (pageMatch != null) {
           if (highestPageScore > bestScore || bestMatch == null) {
@@ -400,9 +445,14 @@ class CurseForgeClient {
   Future<CfFile?> _selectBestMatchingFile(
     int modId,
     Iterable<CfFile> files,
-    WowVersionProfile profile,
-  ) async {
-    return _resolveRankedCandidates(modId, _rankCandidates(files, profile));
+    WowVersionProfile profile, {
+    ProviderRequestContext? requestContext,
+  }) async {
+    return _resolveRankedCandidates(
+      modId,
+      _rankCandidates(files, profile),
+      requestContext: requestContext,
+    );
   }
 
   List<({CfFile file, int score})> _rankCandidates(
@@ -427,10 +477,15 @@ class CurseForgeClient {
 
   Future<CfFile?> _resolveRankedCandidates(
     int modId,
-    List<({CfFile file, int score})> rankedCandidates,
-  ) async {
+    List<({CfFile file, int score})> rankedCandidates, {
+    ProviderRequestContext? requestContext,
+  }) async {
     for (final candidate in rankedCandidates) {
-      final resolvedUrl = await _resolveDownloadUrl(modId, candidate.file);
+      final resolvedUrl = await _resolveDownloadUrl(
+        modId,
+        candidate.file,
+        requestContext: requestContext,
+      );
       if (resolvedUrl == null) {
         continue;
       }
@@ -528,24 +583,45 @@ class CurseForgeClient {
         candidate.exactVersion == profile.exactVersion;
   }
 
-  Future<String?> _resolveDownloadUrl(int modId, CfFile file) async {
+  Future<String?> _resolveDownloadUrl(
+    int modId,
+    CfFile file, {
+    ProviderRequestContext? requestContext,
+  }) async {
     final directUrl = _normalizeUrl(file.downloadUrl);
     if (directUrl != null) {
       return directUrl;
     }
 
-    final apiUrl = await _fetchDirectDownloadUrl(modId, file.id);
+    final apiUrl = await _fetchDirectDownloadUrl(
+      modId,
+      file.id,
+      requestContext: requestContext,
+    );
     if (apiUrl != null) {
       return apiUrl;
     }
 
-    return _resolveLegacyDownloadUrl(file.id, file.fileName);
+    return _resolveLegacyDownloadUrl(
+      file.id,
+      file.fileName,
+      requestContext: requestContext,
+    );
   }
 
-  Future<String?> _fetchDirectDownloadUrl(int modId, int fileId) async {
+  Future<String?> _fetchDirectDownloadUrl(
+    int modId,
+    int fileId, {
+    ProviderRequestContext? requestContext,
+  }) async {
     try {
-      final response = await _dio.get(
-        '/v1/mods/$modId/files/$fileId/download-url',
+      final response = await executeWithRetry<Response<dynamic>>(
+        requestContext: requestContext,
+        task: (cancelToken, timeout) => _dio.get(
+          '/v1/mods/$modId/files/$fileId/download-url',
+          cancelToken: cancelToken,
+          options: Options(receiveTimeout: timeout, sendTimeout: timeout),
+        ),
       );
       final data = response.data;
 
@@ -564,14 +640,21 @@ class CurseForgeClient {
     return null;
   }
 
-  Future<String?> _resolveLegacyDownloadUrl(int fileId, String fileName) async {
+  Future<String?> _resolveLegacyDownloadUrl(
+    int fileId,
+    String fileName, {
+    ProviderRequestContext? requestContext,
+  }) async {
     final candidates = _buildLegacyDownloadUrlCandidates(fileId, fileName);
     if (candidates.isEmpty) {
       return null;
     }
 
     for (final candidate in candidates) {
-      if (await _isDownloadUrlReachable(candidate)) {
+      if (await _isDownloadUrlReachable(
+        candidate,
+        requestContext: requestContext,
+      )) {
         return candidate;
       }
     }
@@ -600,14 +683,23 @@ class CurseForgeClient {
     return urls.toSet().toList(growable: false);
   }
 
-  Future<bool> _isDownloadUrlReachable(String url) async {
+  Future<bool> _isDownloadUrlReachable(
+    String url, {
+    ProviderRequestContext? requestContext,
+  }) async {
     try {
-      final response = await _dio.requestUri(
-        Uri.parse(url),
-        options: Options(
-          method: 'HEAD',
-          followRedirects: false,
-          validateStatus: (status) => status != null && status < 500,
+      final response = await executeWithRetry<Response<dynamic>>(
+        requestContext: requestContext,
+        task: (cancelToken, timeout) => _dio.requestUri(
+          Uri.parse(url),
+          cancelToken: cancelToken,
+          options: Options(
+            method: 'HEAD',
+            followRedirects: false,
+            validateStatus: (status) => status != null && status < 500,
+            receiveTimeout: timeout,
+            sendTimeout: timeout,
+          ),
         ),
       );
 

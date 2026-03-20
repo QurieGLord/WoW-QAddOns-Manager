@@ -1,12 +1,6 @@
 import 'package:wow_qaddons_manager/core/utils/wow_version_profile.dart';
 
-enum ClientType {
-  retail,
-  classic,
-  ptr,
-  legacy,
-  unknown,
-}
+enum ClientType { retail, classic, ptr, legacy, unknown }
 
 class GameClient {
   final String id;
@@ -18,12 +12,33 @@ class GameClient {
   final String? executableName;
   final String? displayName;
 
-  String get resolvedDisplayName => buildDisplayName(
+  String get defaultDisplayName => buildDisplayName(
     version: version,
     type: type,
     productCode: productCode,
     executableName: executableName,
   );
+
+  String? get customDisplayName {
+    final trimmed = displayName?.trim();
+    if (trimmed == null || trimmed.isEmpty) {
+      return null;
+    }
+
+    final legacyDefaultName = _buildLegacyDisplayName(
+      version: version,
+      type: type,
+      productCode: productCode,
+      executableName: executableName,
+    );
+    if (trimmed == defaultDisplayName || trimmed == legacyDefaultName) {
+      return null;
+    }
+
+    return trimmed;
+  }
+
+  String get resolvedDisplayName => customDisplayName ?? defaultDisplayName;
 
   GameClient({
     required this.id,
@@ -60,6 +75,7 @@ class GameClient {
 
   GameClient copyWith({
     String? displayName,
+    bool clearDisplayName = false,
     String? version,
     String? build,
     ClientType? type,
@@ -73,7 +89,7 @@ class GameClient {
       type: type ?? this.type,
       productCode: productCode ?? this.productCode,
       executableName: executableName,
-      displayName: displayName ?? this.displayName,
+      displayName: clearDisplayName ? null : displayName ?? this.displayName,
     );
   }
 
@@ -86,7 +102,8 @@ class GameClient {
     if (normalizedProduct.contains('ptr')) {
       return ClientType.ptr;
     }
-    if (normalizedProduct.contains('classic') || normalizedProduct.contains('era')) {
+    if (normalizedProduct.contains('classic') ||
+        normalizedProduct.contains('era')) {
       return ClientType.classic;
     }
     if (normalizedProduct == 'wow' || normalizedProduct == 'wow_beta') {
@@ -99,9 +116,10 @@ class GameClient {
       WowVersionFamily.shadowlands ||
       WowVersionFamily.dragonflight ||
       WowVersionFamily.warWithin => ClientType.retail,
-      WowVersionFamily.vanilla => fallbackType == ClientType.classic
-          ? ClientType.classic
-          : ClientType.legacy,
+      WowVersionFamily.vanilla =>
+        fallbackType == ClientType.classic
+            ? ClientType.classic
+            : ClientType.legacy,
       WowVersionFamily.unknown => fallbackType ?? ClientType.legacy,
       _ => ClientType.legacy,
     };
@@ -113,22 +131,40 @@ class GameClient {
     String? productCode,
     String? executableName,
   }) {
-    if (version.trim().isEmpty || version == 'Unknown') {
-      return executableName?.replaceAll('.exe', '') ?? 'World of Warcraft: Legacy Client';
-    }
-
     final profile = WowVersionProfile.parse(version);
-    var label = _labelForProfile(
-      profile,
-      type: type,
-      productCode: productCode,
-    );
+    var label = _labelForProfile(profile, type: type, productCode: productCode);
 
     if (type == ClientType.ptr && !label.endsWith('PTR')) {
       label = '$label PTR';
     }
 
-    return 'World of Warcraft: $label (${profile.exactVersion})';
+    final resolvedVersion =
+        profile.exactVersion.trim().isEmpty ||
+            profile.exactVersion.toLowerCase() == 'unknown'
+        ? 'Unknown'
+        : profile.exactVersion;
+    return '$label ($resolvedVersion)';
+  }
+
+  static String _buildLegacyDisplayName({
+    required String version,
+    required ClientType type,
+    String? productCode,
+    String? executableName,
+  }) {
+    final profile = WowVersionProfile.parse(version);
+    var label = _labelForProfile(profile, type: type, productCode: productCode);
+
+    if (type == ClientType.ptr && !label.endsWith('PTR')) {
+      label = '$label PTR';
+    }
+
+    final resolvedVersion =
+        profile.exactVersion.trim().isEmpty ||
+            profile.exactVersion.toLowerCase() == 'unknown'
+        ? 'Unknown'
+        : profile.exactVersion;
+    return 'World of Warcraft: $label ($resolvedVersion)';
   }
 
   static String _labelForProfile(
@@ -138,11 +174,13 @@ class GameClient {
   }) {
     final normalizedProduct = productCode?.trim().toLowerCase() ?? '';
     final isClassicProduct =
-        normalizedProduct.contains('classic') || normalizedProduct.contains('era');
+        normalizedProduct.contains('classic') ||
+        normalizedProduct.contains('era');
 
     return switch (profile.family) {
       WowVersionFamily.vanilla =>
-        profile.exactVersion.startsWith('1.15') || normalizedProduct.contains('sod')
+        profile.exactVersion.startsWith('1.15') ||
+                normalizedProduct.contains('sod')
             ? 'Season of Discovery'
             : type == ClientType.classic || isClassicProduct
             ? 'Classic Era'

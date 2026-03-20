@@ -24,7 +24,7 @@
       "version": {}
     }
   },
-  "discoveryFeedSubtitle": "Это подборка популярных аддонов из CurseForge для версии клиента {version}, а не результаты текстового поиска.",
+  "discoveryFeedSubtitle": "Это подборка популярных аддонов из доступных источников для версии клиента {version}, а не результаты текстового поиска.",
   "@discoveryFeedSubtitle": {
     "placeholders": {
       "version": {}
@@ -45,7 +45,7 @@
     }
   },
   "discoveryFeedEmptyTitle": "Популярные аддоны не найдены",
-  "discoveryFeedEmptyMessage": "CurseForge не вернул подборку популярных аддонов для версии клиента {version}.",
+  "discoveryFeedEmptyMessage": "Доступные источники не вернули подборку популярных аддонов для версии клиента {version}.",
   "@discoveryFeedEmptyMessage": {
     "placeholders": {
       "version": {}

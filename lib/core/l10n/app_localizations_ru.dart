@@ -58,7 +58,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String discoveryFeedSubtitle(Object version) {
-    return 'Это подборка популярных аддонов из CurseForge для версии клиента $version, а не результаты текстового поиска.';
+    return 'Это подборка популярных аддонов из доступных источников для версии клиента $version, а не результаты текстового поиска.';
   }
 
   @override
@@ -80,7 +80,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String discoveryFeedEmptyMessage(Object version) {
-    return 'CurseForge не вернул подборку популярных аддонов для версии клиента $version.';
+    return 'Доступные источники не вернули подборку популярных аддонов для версии клиента $version.';
   }
 
   @override

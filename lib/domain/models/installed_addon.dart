@@ -86,6 +86,10 @@ class InstalledAddonGroup {
 
 class AddonInstallResult {
   final List<String> installedFolders;
+  final String displayName;
 
-  const AddonInstallResult({required this.installedFolders});
+  const AddonInstallResult({
+    required this.installedFolders,
+    required this.displayName,
+  });
 }

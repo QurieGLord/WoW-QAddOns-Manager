@@ -4,128 +4,114 @@ import 'package:archive/archive.dart';
 import 'package:dio/dio.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:wow_qaddons_manager/core/services/background_task_service.dart';
 import 'package:wow_qaddons_manager/domain/models/game_client.dart';
 import 'package:wow_qaddons_manager/domain/models/installed_addon.dart';
 
 class AddonInstallerService {
   final Dio _dio = Dio();
+  final BackgroundTaskService _backgroundTaskService;
+
+  AddonInstallerService(this._backgroundTaskService);
 
   Future<AddonInstallResult> installAddon(
     String downloadUrl,
     String fileName,
     GameClient client,
   ) async {
-    final addonsDir = await _ensureAddonsDirectory(client);
     final systemTempDir = await getTemporaryDirectory();
     final uniqueId = DateTime.now().microsecondsSinceEpoch.toString();
-    final tempExtractDir = Directory(p.join(systemTempDir.path, 'extract_$uniqueId'));
+    final tempExtractDir = Directory(
+      p.join(systemTempDir.path, 'extract_$uniqueId'),
+    );
     final tempZipPath = p.join(systemTempDir.path, '$uniqueId.zip');
 
     await tempExtractDir.create(recursive: true);
 
     try {
       await _dio.download(downloadUrl, tempZipPath);
-
-      final bytes = await File(tempZipPath).readAsBytes();
-      final archive = ZipDecoder().decodeBytes(bytes);
-      await _extractArchive(archive, tempExtractDir.path);
-
-      final addonRoots = await _collectAddonRoots(tempExtractDir);
-      if (addonRoots.isEmpty) {
-        throw Exception('NO_TOC_FOLDERS_FOUND');
-      }
-
-      final targetFolderNames = <String>{};
-      for (final root in addonRoots) {
-        final targetFolderName = await _resolveTargetFolderName(root, fileName);
-        if (targetFolderName == null || targetFolderName.trim().isEmpty) {
-          continue;
-        }
-
-        targetFolderNames.add(targetFolderName);
-      }
-
-      if (targetFolderNames.isEmpty) {
-        throw Exception('NO_VALID_ADDON_CONTENT');
-      }
-
-      if (await _allTargetFoldersExist(addonsDir, targetFolderNames)) {
-        throw Exception('ALREADY_INSTALLED');
-      }
-
-      final installedFolders = <String>{};
-      for (final root in addonRoots) {
-        final targetFolderName = await _resolveTargetFolderName(root, fileName);
-        if (targetFolderName == null || targetFolderName.trim().isEmpty) {
-          continue;
-        }
-
-        final targetDir = Directory(p.join(addonsDir.path, targetFolderName));
-        if (await targetDir.exists()) {
-          await targetDir.delete(recursive: true);
-        }
-
-        await _copyAddonRoot(root, targetDir);
-        installedFolders.add(targetFolderName);
-      }
-
-      if (installedFolders.isEmpty) {
-        throw Exception('NO_VALID_ADDON_CONTENT');
-      }
-
-      return AddonInstallResult(
-        installedFolders: installedFolders.toList()..sort(),
+      await _extractZipFile(File(tempZipPath), tempExtractDir);
+      final result = await _installPreparedContent(
+        tempExtractDir,
+        client,
+        sourceLabel: fileName,
+        strictConflictCheck: false,
+        replaceExisting: true,
       );
+      return result;
     } finally {
       await _safeDeleteDirectory(tempExtractDir);
       await _safeDeleteFile(File(tempZipPath));
     }
   }
 
-  Future<List<InstalledAddonFolder>> scanInstalledFolders(GameClient client) async {
+  Future<AddonInstallResult> installFromArchive(
+    String archivePath,
+    GameClient client, {
+    bool replaceExisting = false,
+  }) async {
+    final sourceFile = File(archivePath);
+    if (!await sourceFile.exists()) {
+      throw Exception('ARCHIVE_NOT_FOUND');
+    }
+
+    final systemTempDir = await getTemporaryDirectory();
+    final uniqueId = DateTime.now().microsecondsSinceEpoch.toString();
+    final tempExtractDir = Directory(
+      p.join(systemTempDir.path, 'manual_extract_$uniqueId'),
+    );
+
+    await tempExtractDir.create(recursive: true);
+
+    try {
+      await _extractZipFile(sourceFile, tempExtractDir);
+      final result = await _installPreparedContent(
+        tempExtractDir,
+        client,
+        sourceLabel: p.basename(archivePath),
+        strictConflictCheck: true,
+        replaceExisting: replaceExisting,
+      );
+      return result;
+    } finally {
+      await _safeDeleteDirectory(tempExtractDir);
+    }
+  }
+
+  Future<AddonInstallResult> installFromDirectory(
+    String directoryPath,
+    GameClient client, {
+    bool replaceExisting = false,
+  }) async {
+    final sourceDirectory = Directory(directoryPath);
+    if (!await sourceDirectory.exists()) {
+      throw Exception('DIRECTORY_NOT_FOUND');
+    }
+
+    return _installPreparedContent(
+      sourceDirectory,
+      client,
+      sourceLabel: p.basename(directoryPath),
+      strictConflictCheck: true,
+      replaceExisting: replaceExisting,
+    );
+  }
+
+  Future<List<InstalledAddonFolder>> scanInstalledFolders(
+    GameClient client,
+  ) async {
     final addonsDir = Directory(p.join(client.path, 'Interface', 'AddOns'));
     if (!await addonsDir.exists()) {
       return [];
     }
-
-    final folders = <InstalledAddonFolder>[];
-    final entities = await addonsDir.list().toList();
-
-    for (final entity in entities) {
-      if (entity is! Directory) {
-        continue;
-      }
-
-      final folderName = p.basename(entity.path);
-      if (folderName.startsWith('Blizzard_') || folderName.startsWith('.')) {
-        continue;
-      }
-
-      final tocFiles = await _getDirectTocFiles(entity);
-      if (tocFiles.isEmpty) {
-        continue;
-      }
-
-      final metadata = await _parseAddonMetadata(tocFiles, folderName);
-      folders.add(
-        InstalledAddonFolder(
-          folderName: folderName,
-          displayName: metadata.title,
-          title: metadata.title,
-          tocNames: metadata.tocNames,
-          dependencies: metadata.dependencies,
-          xPartOf: metadata.xPartOf,
-        ),
-      );
-    }
-
-    folders.sort((a, b) => a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()));
-    return folders;
+    return _backgroundTaskService.scanInstalledAddonFolders(addonsDir.path);
   }
 
   Future<void> deleteAddon(GameClient client, InstalledAddonGroup group) async {
     for (final folderName in group.installedFolders) {
-      final directory = Directory(p.join(client.path, 'Interface', 'AddOns', folderName));
+      final directory = Directory(
+        p.join(client.path, 'Interface', 'AddOns', folderName),
+      );
       if (await directory.exists()) {
         try {
           await directory.delete(recursive: true);
@@ -136,6 +122,100 @@ class AddonInstallerService {
     }
   }
 
+  Future<AddonInstallResult> _installPreparedContent(
+    Directory preparedRoot,
+    GameClient client, {
+    required String sourceLabel,
+    required bool strictConflictCheck,
+    required bool replaceExisting,
+  }) async {
+    final addonsDir = await _ensureAddonsDirectory(client);
+    final addonRoots = await _backgroundTaskService.analyzeAddonRoots(
+      preparedRoot.path,
+      sourceLabel,
+    );
+    if (addonRoots.isEmpty) {
+      throw Exception('NO_TOC_FOLDERS_FOUND');
+    }
+
+    final resolvedRoots = <_ResolvedAddonRoot>[];
+    final targetFolderNames = <String>{};
+
+    for (final root in addonRoots) {
+      resolvedRoots.add(
+        _ResolvedAddonRoot(
+          source: Directory(root.sourcePath),
+          targetFolderName: root.targetFolderName,
+          title: root.title,
+        ),
+      );
+      targetFolderNames.add(root.targetFolderName);
+    }
+
+    if (resolvedRoots.isEmpty || targetFolderNames.isEmpty) {
+      throw Exception('NO_VALID_ADDON_CONTENT');
+    }
+
+    if (strictConflictCheck) {
+      final conflictingFolders = await _findExistingTargetFolders(
+        addonsDir,
+        targetFolderNames,
+      );
+      if (conflictingFolders.isNotEmpty && !replaceExisting) {
+        throw AddonInstallConflictException(conflictingFolders);
+      }
+    } else if (await _allTargetFoldersExist(addonsDir, targetFolderNames)) {
+      throw Exception('ALREADY_INSTALLED');
+    }
+
+    final installedFolders = <String>{};
+    final stagedDirectories = <Directory>[];
+    final committedDirectories = <Directory>[];
+
+    try {
+      for (final root in resolvedRoots) {
+        final targetDir = Directory(
+          p.join(addonsDir.path, root.targetFolderName),
+        );
+        final stagedTargetDir = await _prepareStagedTargetDirectory(
+          addonsDir,
+          root.targetFolderName,
+        );
+        stagedDirectories.add(stagedTargetDir);
+
+        await _copyAddonRoot(root.source, stagedTargetDir);
+        await _ensureValidInstalledRoot(stagedTargetDir);
+
+        if (await targetDir.exists()) {
+          await targetDir.delete(recursive: true);
+        }
+
+        await stagedTargetDir.rename(targetDir.path);
+        stagedDirectories.remove(stagedTargetDir);
+        committedDirectories.add(targetDir);
+        installedFolders.add(root.targetFolderName);
+      }
+    } catch (_) {
+      for (final stagedDirectory in stagedDirectories) {
+        await _safeDeleteDirectory(stagedDirectory);
+      }
+
+      for (final committedDirectory in committedDirectories) {
+        await _safeDeleteDirectory(committedDirectory);
+      }
+      rethrow;
+    }
+
+    if (installedFolders.isEmpty) {
+      throw Exception('NO_VALID_ADDON_CONTENT');
+    }
+
+    return AddonInstallResult(
+      installedFolders: installedFolders.toList()..sort(),
+      displayName: _resolveInstalledDisplayName(resolvedRoots, sourceLabel),
+    );
+  }
+
   Future<Directory> _ensureAddonsDirectory(GameClient client) async {
     final addonsDir = Directory(p.join(client.path, 'Interface', 'AddOns'));
     if (!await addonsDir.exists()) {
@@ -144,12 +224,24 @@ class AddonInstallerService {
     return addonsDir;
   }
 
+  Future<void> _extractZipFile(
+    File archiveFile,
+    Directory outputDirectory,
+  ) async {
+    final bytes = await archiveFile.readAsBytes();
+    final archive = ZipDecoder().decodeBytes(bytes);
+    await _extractArchive(archive, outputDirectory.path);
+  }
+
   Future<void> _extractArchive(Archive archive, String outputPath) async {
     final normalizedOutputPath = p.normalize(outputPath);
 
     for (final file in archive) {
-      final sanitizedName = p.normalize(file.name.replaceAll('\\', p.separator).trim());
+      final sanitizedName = p.normalize(
+        file.name.replaceAll('\\', p.separator).trim(),
+      );
       if (sanitizedName.isEmpty ||
+          _containsUnsupportedPathSegment(sanitizedName) ||
           p.isAbsolute(sanitizedName) ||
           sanitizedName.startsWith('..') ||
           sanitizedName.startsWith('/')) {
@@ -157,7 +249,8 @@ class AddonInstallerService {
       }
 
       final filePath = p.normalize(p.join(normalizedOutputPath, sanitizedName));
-      if (filePath != normalizedOutputPath && !p.isWithin(normalizedOutputPath, filePath)) {
+      if (filePath != normalizedOutputPath &&
+          !p.isWithin(normalizedOutputPath, filePath)) {
         continue;
       }
 
@@ -171,87 +264,21 @@ class AddonInstallerService {
     }
   }
 
-  Future<List<Directory>> _collectAddonRoots(Directory rootDir) async {
-    final addonRoots = <Directory>[];
+  Future<List<String>> _findExistingTargetFolders(
+    Directory addonsDir,
+    Iterable<String> folderNames,
+  ) async {
+    final conflicts = <String>[];
 
-    Future<void> traverse(Directory directory) async {
-      final tocFiles = await _getDirectTocFiles(directory);
-      if (tocFiles.isNotEmpty) {
-        addonRoots.add(directory);
-        return;
-      }
-
-      final children = await directory.list().toList();
-      for (final child in children.whereType<Directory>()) {
-        final folderName = p.basename(child.path);
-        if (_shouldSkipFolder(folderName)) {
-          continue;
-        }
-        await traverse(child);
+    for (final folderName in folderNames) {
+      final targetDir = Directory(p.join(addonsDir.path, folderName));
+      if (await targetDir.exists()) {
+        conflicts.add(folderName);
       }
     }
 
-    await traverse(rootDir);
-    return addonRoots;
-  }
-
-  Future<List<File>> _getDirectTocFiles(Directory directory) async {
-    final entities = await directory.list().toList();
-    return entities
-        .whereType<File>()
-        .where((file) => file.path.toLowerCase().endsWith('.toc'))
-        .toList();
-  }
-
-  bool _shouldSkipFolder(String folderName) {
-    final lower = folderName.toLowerCase();
-    return lower == '.git' ||
-        lower == '.github' ||
-        lower == '__macosx' ||
-        lower == '.idea' ||
-        lower == '.vscode';
-  }
-
-  Future<String?> _resolveTargetFolderName(Directory root, String archiveFileName) async {
-    final tocFiles = await _getDirectTocFiles(root);
-    if (root.parent.path == root.path) {
-      return null;
-    }
-
-    if (tocFiles.isEmpty) {
-      return _sanitizeFolderName(_stripArchiveExtension(archiveFileName));
-    }
-
-    final rootFolderName = p.basename(root.path);
-    final normalizedRootFolderName = _normalizeFolderKey(rootFolderName);
-    final archiveBaseName = _normalizeFolderKey(_stripArchiveExtension(archiveFileName));
-    final tocNames =
-        tocFiles
-            .map((file) => p.basenameWithoutExtension(file.path))
-            .where((name) => name.trim().isNotEmpty)
-            .toList(growable: false);
-
-    final matchingTocByFolder = tocNames.firstWhere(
-      (tocName) => _normalizeFolderKey(tocName) == normalizedRootFolderName,
-      orElse: () => '',
-    );
-    if (matchingTocByFolder.isNotEmpty) {
-      return _sanitizeFolderName(matchingTocByFolder);
-    }
-
-    final matchingTocByArchive = tocNames.firstWhere(
-      (tocName) => _normalizeFolderKey(tocName) == archiveBaseName,
-      orElse: () => '',
-    );
-    if (matchingTocByArchive.isNotEmpty) {
-      return _sanitizeFolderName(matchingTocByArchive);
-    }
-
-    if (tocNames.length == 1) {
-      return _sanitizeFolderName(tocNames.first);
-    }
-
-    return _sanitizeFolderName(rootFolderName);
+    conflicts.sort();
+    return conflicts;
   }
 
   Future<bool> _allTargetFoldersExist(
@@ -269,130 +296,157 @@ class AddonInstallerService {
   }
 
   Future<void> _copyAddonRoot(Directory source, Directory target) async {
+    if (!await source.exists()) {
+      throw FileSystemException('Addon root is missing', source.path);
+    }
     await target.create(recursive: true);
-    await for (final entity in source.list(recursive: false)) {
+    await _copyDirectoryContents(source, target);
+  }
+
+  Future<void> _copyDirectoryContents(
+    Directory source,
+    Directory target,
+  ) async {
+    if (!await source.exists()) {
+      throw FileSystemException('Source directory is missing', source.path);
+    }
+    await target.create(recursive: true);
+    final entities = await _listDirectoryEntities(source);
+    for (final entity in entities) {
       final name = p.basename(entity.path);
-      if (_shouldSkipEntity(name)) {
+      if (_shouldSkipCopiedEntry(name)) {
         continue;
       }
 
       final targetPath = p.join(target.path, name);
       if (entity is File) {
-        await entity.copy(targetPath);
+        if (!await entity.exists()) {
+          continue;
+        }
+
+        final targetFile = File(targetPath);
+        await targetFile.parent.create(recursive: true);
+        await targetFile.writeAsBytes(await entity.readAsBytes());
       } else if (entity is Directory) {
-        await _copyDirectory(entity, Directory(targetPath));
+        await _copyDirectoryContents(entity, Directory(targetPath));
       }
     }
   }
 
-  Future<void> _copyDirectory(Directory source, Directory target) async {
-    await target.create(recursive: true);
-    await for (final entity in source.list(recursive: false)) {
-      final name = p.basename(entity.path);
-      if (_shouldSkipEntity(name)) {
-        continue;
-      }
-
-      final targetPath = p.join(target.path, name);
-      if (entity is File) {
-        await entity.copy(targetPath);
-      } else if (entity is Directory) {
-        await _copyDirectory(entity, Directory(targetPath));
-      }
-    }
-  }
-
-  bool _shouldSkipEntity(String name) {
-    final lower = name.toLowerCase();
-    return lower == '.ds_store' ||
-        lower == 'thumbs.db' ||
-        lower == '.gitignore' ||
-        lower == '.gitattributes' ||
-        lower == '.editorconfig' ||
-        lower == 'license' ||
-        lower == 'license.txt' ||
-        lower == 'readme' ||
-        lower == 'readme.md' ||
-        lower == 'changelog' ||
-        lower == 'changelog.md' ||
-        lower == '__macosx';
-  }
-
-  Future<_TocMetadata> _parseAddonMetadata(List<File> tocFiles, String fallback) async {
-    String displayName = fallback;
-    final tocNames =
-        tocFiles
-            .map((file) => p.basenameWithoutExtension(file.path))
-            .where((name) => name.trim().isNotEmpty)
-            .toList(growable: false);
-    final dependencies = <String>[];
-    String? xPartOf;
-
-    try {
-      final preferredToc = tocFiles.firstWhere(
-        (file) => p.basename(file.path).toLowerCase() == '${fallback.toLowerCase()}.toc',
-        orElse: () => tocFiles.first,
-      );
-
-      final lines = await preferredToc.readAsLines();
-      for (final line in lines) {
-        final trimmedLine = line.trim();
-
-        if (trimmedLine.startsWith('## Title:')) {
-          final title = trimmedLine.replaceFirst('## Title:', '').trim();
-          if (title.isNotEmpty) {
-            displayName = _cleanWowTitle(title);
-          }
-          continue;
-        }
-
-        if (trimmedLine.startsWith('## RequiredDeps:')) {
-          final value = trimmedLine.replaceFirst('## RequiredDeps:', '').trim();
-          dependencies.addAll(_parseDependencies(value));
-          continue;
-        }
-
-        if (trimmedLine.startsWith('## Dependencies:')) {
-          final value = trimmedLine.replaceFirst('## Dependencies:', '').trim();
-          dependencies.addAll(_parseDependencies(value));
-          continue;
-        }
-
-        if (trimmedLine.startsWith('## X-Part-Of:')) {
-          final value = trimmedLine.replaceFirst('## X-Part-Of:', '').trim();
-          if (value.isNotEmpty) {
-            xPartOf = _cleanWowTitle(value);
-          }
-        }
-      }
-    } catch (_) {
-      return _TocMetadata(title: fallback);
-    }
-
-    return _TocMetadata(
-      title: displayName,
-      tocNames: tocNames,
-      dependencies: dependencies.toSet().toList(),
-      xPartOf: xPartOf,
+  Future<Directory> _prepareStagedTargetDirectory(
+    Directory addonsDir,
+    String targetFolderName,
+  ) async {
+    final stagedDirectory = Directory(
+      p.join(
+        addonsDir.path,
+        '.qadd_stage_${DateTime.now().microsecondsSinceEpoch}_$targetFolderName',
+      ),
     );
+    if (await stagedDirectory.exists()) {
+      await stagedDirectory.delete(recursive: true);
+    }
+    await stagedDirectory.create(recursive: true);
+    return stagedDirectory;
   }
 
-  List<String> _parseDependencies(String rawValue) {
-    return rawValue
-        .split(',')
-        .map((dependency) => dependency.trim())
-        .where((dependency) => dependency.isNotEmpty)
-        .toList();
+  Future<void> _ensureValidInstalledRoot(Directory directory) async {
+    final tocFiles = await _getDirectTocFiles(directory);
+    if (tocFiles.isEmpty) {
+      throw Exception('INVALID_ADDON_ROOT');
+    }
   }
 
-  String _cleanWowTitle(String title) {
-    return title
-        .replaceAll(RegExp(r'\|c[0-9a-fA-F]{8}'), '')
-        .replaceAll('|r', '')
+  Future<List<File>> _getDirectTocFiles(Directory directory) async {
+    final entities = await _listDirectoryEntities(directory);
+    return entities
+        .whereType<File>()
+        .where((file) => file.path.toLowerCase().endsWith('.toc'))
+        .toList(growable: false);
+  }
+
+  bool _shouldSkipCopiedEntry(String name) {
+    final lower = name.toLowerCase();
+    return _containsUnsupportedPathSegment(name) || lower == '__macosx';
+  }
+
+  String _resolveInstalledDisplayName(
+    List<_ResolvedAddonRoot> roots,
+    String fallbackSource,
+  ) {
+    if (roots.isEmpty) {
+      return _prettifyGroupTitle(_stripSourceExtension(fallbackSource));
+    }
+
+    if (roots.length == 1) {
+      return roots.first.title;
+    }
+
+    final groupedTitles = roots
+        .map((root) => _extractTitleGroupBase(root.title))
+        .where((value) => value.trim().isNotEmpty)
+        .toSet();
+    if (groupedTitles.length == 1) {
+      return groupedTitles.first;
+    }
+
+    final prefix = _extractCommonFolderPrefix(
+      roots.map((root) => root.targetFolderName).toList(growable: false),
+    );
+    if (prefix != null && prefix.trim().isNotEmpty) {
+      return _prettifyGroupTitle(prefix);
+    }
+
+    return roots.first.title;
+  }
+
+  String _extractTitleGroupBase(String title) {
+    final withoutBrackets = title.replaceAll(RegExp(r'\[[^\]]+\]'), ' ').trim();
+    final withoutParentheses = withoutBrackets
+        .replaceAll(RegExp(r'\([^\)]+\)'), ' ')
         .trim();
+    final splitByDash = withoutParentheses
+        .split(RegExp(r'\s*[-:]\s*'))
+        .first
+        .trim();
+    return splitByDash.isEmpty ? title.trim() : splitByDash;
   }
 
-  String _stripArchiveExtension(String fileName) {
+  String? _extractCommonFolderPrefix(List<String> folderNames) {
+    if (folderNames.length < 2) {
+      return null;
+    }
+
+    String? sharedPrefix;
+    for (final folderName in folderNames) {
+      final parts = folderName.split(RegExp(r'[_-]'));
+      if (parts.length < 2 || parts.first.trim().isEmpty) {
+        return null;
+      }
+
+      final prefix = parts.first.trim();
+      if (sharedPrefix == null) {
+        sharedPrefix = prefix;
+        continue;
+      }
+
+      if (sharedPrefix.toLowerCase() != prefix.toLowerCase()) {
+        return null;
+      }
+    }
+
+    return sharedPrefix;
+  }
+
+  String _prettifyGroupTitle(String value) {
+    final normalized = value
+        .replaceAll(RegExp(r'[_-]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return normalized.isEmpty ? 'Addon' : normalized;
+  }
+
+  String _stripSourceExtension(String fileName) {
     final lower = fileName.toLowerCase();
     if (lower.endsWith('.zip')) {
       return fileName.substring(0, fileName.length - 4);
@@ -400,20 +454,29 @@ class AddonInstallerService {
     return fileName;
   }
 
-  String _sanitizeFolderName(String input) {
-    final cleaned = input
-        .replaceAll(RegExp(r'-(main|master)$', caseSensitive: false), '')
-        .replaceAll(RegExp(r'[^A-Za-z0-9_!.-]'), '_')
-        .replaceAll(RegExp(r'_+'), '_')
-        .trim();
-    return cleaned.isEmpty ? 'Addon' : cleaned;
+  Future<List<FileSystemEntity>> _listDirectoryEntities(
+    Directory directory,
+  ) async {
+    try {
+      return await directory.list().toList();
+    } catch (_) {
+      return const <FileSystemEntity>[];
+    }
   }
 
-  String _normalizeFolderKey(String input) {
-    return input
-        .toLowerCase()
-        .replaceAll(RegExp(r'-(main|master)$', caseSensitive: false), '')
-        .replaceAll(RegExp(r'[^a-z0-9]'), '');
+  bool _containsUnsupportedPathSegment(String path) {
+    final segments = path
+        .split(RegExp(r'[\\/]'))
+        .map((segment) => segment.trim())
+        .where((segment) => segment.isNotEmpty);
+
+    for (final segment in segments) {
+      if (RegExp(r'[<>:"|?*]').hasMatch(segment)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   Future<void> _safeDeleteDirectory(Directory directory) async {
@@ -429,16 +492,25 @@ class AddonInstallerService {
   }
 }
 
-class _TocMetadata {
-  final String title;
-  final List<String> tocNames;
-  final List<String> dependencies;
-  final String? xPartOf;
+class AddonInstallConflictException implements Exception {
+  final List<String> folderNames;
 
-  const _TocMetadata({
+  const AddonInstallConflictException(this.folderNames);
+
+  @override
+  String toString() {
+    return 'AddonInstallConflictException(${folderNames.join(', ')})';
+  }
+}
+
+class _ResolvedAddonRoot {
+  final Directory source;
+  final String targetFolderName;
+  final String title;
+
+  const _ResolvedAddonRoot({
+    required this.source,
+    required this.targetFolderName,
     required this.title,
-    this.tocNames = const <String>[],
-    this.dependencies = const <String>[],
-    this.xPartOf,
   });
 }

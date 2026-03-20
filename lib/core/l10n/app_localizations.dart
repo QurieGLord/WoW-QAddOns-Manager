@@ -185,7 +185,7 @@ abstract class AppLocalizations {
   /// No description provided for @discoveryFeedSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'This is a popularity feed from CurseForge for client version {version}, not a text search result.'**
+  /// **'This is a popularity feed from the available addon sources for client version {version}, not a text search result.'**
   String discoveryFeedSubtitle(Object version);
 
   /// No description provided for @discoveryFeedLoading.
@@ -215,7 +215,7 @@ abstract class AppLocalizations {
   /// No description provided for @discoveryFeedEmptyMessage.
   ///
   /// In en, this message translates to:
-  /// **'CurseForge didn\'t return a popular addons feed for client version {version}.'**
+  /// **'The available addon sources didn\'t return a popular addons feed for client version {version}.'**
   String discoveryFeedEmptyMessage(Object version);
 
   /// No description provided for @searchResultsTitle.
