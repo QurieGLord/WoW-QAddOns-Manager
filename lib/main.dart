@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:wow_qaddons_manager/app/providers/service_providers.dart';
 import 'package:wow_qaddons_manager/core/l10n/app_localizations.dart';
 import 'package:wow_qaddons_manager/core/theme/app_theme.dart';
+import 'package:wow_qaddons_manager/core/utils/wow_version_profile.dart';
 import 'package:wow_qaddons_manager/data/network/github_provider.dart';
 import 'package:wow_qaddons_manager/data/services/addon_identity_service.dart';
 import 'package:wow_qaddons_manager/data/services/addon_installer_service.dart';
@@ -26,24 +29,43 @@ import 'package:wow_qaddons_manager/shared/widgets/performance_tracked_scope.dar
 const bool kShowPerformanceOverlay = bool.fromEnvironment(
   'SHOW_PERFORMANCE_OVERLAY',
 );
+const String kAppVersionLabel = '1.0.0';
+final Uri kProjectGitHubUri = Uri.parse(
+  'https://github.com/QurieGLord/WoW-QAddOns-Manager',
+);
+final Uri kProjectBoostyUri = Uri.parse('https://boosty.to/qurieglord');
+const String kClientCardAssetsRoot = 'assets/client_cards';
+Future<Set<String>>? _clientCardAssetManifestFuture;
+
+String _clientBannerAssetPath(String slot) =>
+    '$kClientCardAssetsRoot/$slot/banner.png';
+
+Future<Set<String>> _loadClientCardAssetManifest() {
+  return _clientCardAssetManifestFuture ??= (() async {
+    try {
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      return manifest.listAssets().toSet();
+    } catch (_) {
+      return <String>{};
+    }
+  })();
+}
 
 class AppIcons {
-  static const IconData interface = Icons.tune_rounded;
-  static const IconData wow = Icons.videogame_asset_rounded;
-  static const IconData downloads = Icons.download_rounded;
+  static const IconData appearance = Icons.palette_outlined;
+  static const IconData application = Icons.widgets_outlined;
   static const IconData info = Icons.info_rounded;
 }
 
 // Localization Stub
 class AppLocalizationsStub {
-  static String appTitle(String locale) =>
-      locale == 'ru' ? 'WoW QAddOns Менеджер' : 'WoW QAddOns Manager';
+  static String appTitle(String locale) => 'Qddons Manager';
   static String homeTitle(String locale) =>
       locale == 'ru' ? 'Клиенты WoW' : 'WoW Clients';
   static String settingsTitle(String locale) =>
       locale == 'ru' ? 'Настройки' : 'Settings';
   static String interfaceSection(String locale) =>
-      locale == 'ru' ? 'Интерфейс' : 'Interface';
+      locale == 'ru' ? 'Внешний вид' : 'Appearance';
   static String languageSection(String locale) =>
       locale == 'ru' ? 'Язык' : 'Language';
   static String themeModeLabel(String locale) =>
@@ -51,9 +73,9 @@ class AppLocalizationsStub {
   static String colorSchemeLabel(String locale) =>
       locale == 'ru' ? 'Цветовая схема' : 'Color Scheme';
   static String wowClientsSection(String locale) =>
-      locale == 'ru' ? 'Клиенты WoW' : 'WoW Clients';
+      locale == 'ru' ? 'Приложение' : 'Application';
   static String downloadsSection(String locale) =>
-      locale == 'ru' ? 'Загрузки' : 'Downloads';
+      locale == 'ru' ? 'Приложение' : 'Application';
   static String aboutSection(String locale) =>
       locale == 'ru' ? 'О приложении' : 'About';
   static String versionLabel(String locale) =>
@@ -183,7 +205,8 @@ class MyApp extends ConsumerWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       showPerformanceOverlay: kShowPerformanceOverlay,
-      title: AppLocalizationsStub.appTitle(settings.locale.languageCode),
+      onGenerateTitle: (context) =>
+          AppLocalizations.of(context)?.appTitle ?? 'Qddons Manager',
       themeMode: settings.themeMode,
       theme: AppTheme.createTheme(Brightness.light, settings.seedColor),
       darkTheme: AppTheme.createTheme(Brightness.dark, settings.seedColor),
@@ -317,13 +340,14 @@ class HomeScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(appSettingsProvider);
     final locale = settings.locale.languageCode;
+    final l10n = AppLocalizations.of(context)!;
     final clients = ref.watch(clientListProvider);
 
     return PerformanceTrackedScope(
       screenName: 'Home',
       child: Scaffold(
         appBar: AppBar(
-          title: Text(AppLocalizationsStub.appTitle(locale)),
+          title: Text(l10n.appTitle),
           actions: [
             IconButton(
               icon: const Icon(Icons.settings_outlined),
@@ -361,7 +385,7 @@ class HomeScreen extends ConsumerWidget {
                 addAutomaticKeepAlives: false,
                 gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                   maxCrossAxisExtent: 400,
-                  mainAxisExtent: 220,
+                  mainAxisExtent: 312,
                   crossAxisSpacing: 24,
                   mainAxisSpacing: 24,
                 ),
@@ -494,14 +518,471 @@ Future<GameClient?> _promptRenameClient(
   return updatedClient;
 }
 
+Future<void> _openExternalLink(BuildContext context, Uri uri) async {
+  final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!launched && context.mounted) {
+    final l10n = AppLocalizations.of(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(l10n?.externalLinkErrorMessage ?? 'Could not open link'),
+        backgroundColor: Theme.of(context).colorScheme.error,
+      ),
+    );
+  }
+}
+
+enum _SettingsWorkspaceSection { appearance, application, about }
+
+class _ClientVisualSpec {
+  final String eraLabel;
+  final String? assetPath;
+  final IconData emblemIcon;
+  final List<Color> gradientColors;
+  final Alignment begin;
+  final Alignment end;
+  final Color accentColor;
+  final Color badgeColor;
+  final Color badgeForeground;
+  final Color overlayColor;
+
+  const _ClientVisualSpec({
+    required this.eraLabel,
+    required this.assetPath,
+    required this.emblemIcon,
+    required this.gradientColors,
+    required this.begin,
+    required this.end,
+    required this.accentColor,
+    required this.badgeColor,
+    required this.badgeForeground,
+    required this.overlayColor,
+  });
+}
+
+_ClientVisualSpec _buildClientVisualSpec(
+  GameClient client,
+  ColorScheme colorScheme,
+) {
+  final profile = WowVersionProfile.parse(client.version);
+
+  Color soften(Color color, [double amount = 0.32]) =>
+      Color.lerp(color, colorScheme.surface, amount) ?? color;
+
+  return switch (profile.family) {
+    WowVersionFamily.wrath => _ClientVisualSpec(
+      eraLabel: 'Wrath of the Lich King',
+      assetPath: _clientBannerAssetPath('wrath'),
+      emblemIcon: Icons.ac_unit_rounded,
+      gradientColors: <Color>[
+        soften(const Color(0xFF143A6E), 0.16),
+        soften(const Color(0xFF57A7E8), 0.12),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      accentColor: const Color(0xFFBFE3FF),
+      badgeColor: const Color(0xFFE5F3FF),
+      badgeForeground: const Color(0xFF143A6E),
+      overlayColor: Colors.white,
+    ),
+    WowVersionFamily.cataclysm => _ClientVisualSpec(
+      eraLabel: 'Cataclysm',
+      assetPath: _clientBannerAssetPath('cataclysm'),
+      emblemIcon: Icons.local_fire_department_rounded,
+      gradientColors: <Color>[
+        soften(const Color(0xFF3A1E14), 0.12),
+        soften(const Color(0xFFD86E2B), 0.16),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      accentColor: const Color(0xFFFFC18F),
+      badgeColor: const Color(0xFFFFE4D0),
+      badgeForeground: const Color(0xFF6A2E10),
+      overlayColor: const Color(0xFFFFF4EC),
+    ),
+    WowVersionFamily.mistsOfPandaria => _ClientVisualSpec(
+      eraLabel: 'Mists of Pandaria',
+      assetPath: _clientBannerAssetPath('mists_of_pandaria'),
+      emblemIcon: Icons.spa_rounded,
+      gradientColors: <Color>[
+        soften(const Color(0xFF0F524A), 0.12),
+        soften(const Color(0xFF4DAF8F), 0.16),
+      ],
+      begin: Alignment.bottomLeft,
+      end: Alignment.topRight,
+      accentColor: const Color(0xFFCFEFE5),
+      badgeColor: const Color(0xFFE4F7EF),
+      badgeForeground: const Color(0xFF104F43),
+      overlayColor: Colors.white,
+    ),
+    WowVersionFamily.legion => _ClientVisualSpec(
+      eraLabel: 'Legion',
+      assetPath: _clientBannerAssetPath('legion'),
+      emblemIcon: Icons.shield_moon_rounded,
+      gradientColors: <Color>[
+        soften(const Color(0xFF13211A), 0.1),
+        soften(const Color(0xFF5CBF58), 0.2),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      accentColor: const Color(0xFFD9FFD0),
+      badgeColor: const Color(0xFFE9FFE5),
+      badgeForeground: const Color(0xFF1F5F1A),
+      overlayColor: const Color(0xFFF3FFF0),
+    ),
+    WowVersionFamily.battleForAzeroth => _ClientVisualSpec(
+      eraLabel: 'Battle for Azeroth',
+      assetPath: _clientBannerAssetPath('battle_for_azeroth'),
+      emblemIcon: Icons.explore_rounded,
+      gradientColors: <Color>[
+        soften(const Color(0xFF1E2949), 0.08),
+        soften(const Color(0xFFC99A36), 0.18),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      accentColor: const Color(0xFFFFE4A8),
+      badgeColor: const Color(0xFFFFF0CC),
+      badgeForeground: const Color(0xFF624514),
+      overlayColor: const Color(0xFFFFFAF0),
+    ),
+    WowVersionFamily.shadowlands => _ClientVisualSpec(
+      eraLabel: 'Shadowlands',
+      assetPath: _clientBannerAssetPath('shadowlands'),
+      emblemIcon: Icons.dark_mode_rounded,
+      gradientColors: <Color>[
+        soften(const Color(0xFF221B36), 0.08),
+        soften(const Color(0xFF8D79D6), 0.2),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      accentColor: const Color(0xFFE4DDFF),
+      badgeColor: const Color(0xFFF1ECFF),
+      badgeForeground: const Color(0xFF423170),
+      overlayColor: const Color(0xFFF7F4FF),
+    ),
+    WowVersionFamily.dragonflight => _ClientVisualSpec(
+      eraLabel: 'Dragonflight',
+      assetPath: _clientBannerAssetPath('dragonflight'),
+      emblemIcon: Icons.auto_awesome_rounded,
+      gradientColors: <Color>[
+        soften(const Color(0xFF622C24), 0.08),
+        soften(const Color(0xFFE98646), 0.18),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      accentColor: const Color(0xFFFFD9BE),
+      badgeColor: const Color(0xFFFFEBDD),
+      badgeForeground: const Color(0xFF6F3314),
+      overlayColor: const Color(0xFFFFF5EE),
+    ),
+    WowVersionFamily.warWithin => _ClientVisualSpec(
+      eraLabel: 'The War Within',
+      assetPath: _clientBannerAssetPath('the_war_within'),
+      emblemIcon: Icons.auto_awesome_motion_rounded,
+      gradientColors: <Color>[
+        soften(const Color(0xFF352520), 0.08),
+        soften(const Color(0xFFC18B4A), 0.2),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      accentColor: const Color(0xFFFFDFB6),
+      badgeColor: const Color(0xFFFFEDD4),
+      badgeForeground: const Color(0xFF694119),
+      overlayColor: const Color(0xFFFFF6EB),
+    ),
+    WowVersionFamily.vanilla => _ClientVisualSpec(
+      eraLabel: client.type == ClientType.classic ? 'Classic Era' : 'Vanilla',
+      assetPath: _clientBannerAssetPath('classic_era'),
+      emblemIcon: Icons.auto_awesome_rounded,
+      gradientColors: <Color>[
+        soften(const Color(0xFF4B3423), 0.12),
+        soften(const Color(0xFF9A6D48), 0.18),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      accentColor: const Color(0xFFF1D5BA),
+      badgeColor: const Color(0xFFF7E8D8),
+      badgeForeground: const Color(0xFF5E3B1F),
+      overlayColor: const Color(0xFFFFF8F0),
+    ),
+    WowVersionFamily.burningCrusade => _ClientVisualSpec(
+      eraLabel: client.type == ClientType.classic
+          ? 'Burning Crusade Classic'
+          : 'Burning Crusade',
+      assetPath: _clientBannerAssetPath('burning_crusade'),
+      emblemIcon: Icons.shield_rounded,
+      gradientColors: <Color>[
+        soften(const Color(0xFF214253), 0.1),
+        soften(const Color(0xFF6CC1C6), 0.18),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      accentColor: const Color(0xFFCDEFF1),
+      badgeColor: const Color(0xFFE6F8F9),
+      badgeForeground: const Color(0xFF1F4D50),
+      overlayColor: const Color(0xFFF4FEFF),
+    ),
+    WowVersionFamily.warlordsOfDraenor => _ClientVisualSpec(
+      eraLabel: 'Warlords of Draenor',
+      assetPath: _clientBannerAssetPath('warlords_of_draenor'),
+      emblemIcon: Icons.gavel_rounded,
+      gradientColors: <Color>[
+        soften(const Color(0xFF4C241D), 0.08),
+        soften(const Color(0xFFB3583D), 0.18),
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      accentColor: const Color(0xFFFFD0C1),
+      badgeColor: const Color(0xFFFFE7E0),
+      badgeForeground: const Color(0xFF6A2F23),
+      overlayColor: const Color(0xFFFFF3EF),
+    ),
+    _ => _ClientVisualSpec(
+      eraLabel: client.defaultDisplayName.split(' (').first,
+      assetPath: _clientBannerAssetPath('generic'),
+      emblemIcon: Icons.extension_rounded,
+      gradientColors: <Color>[
+        colorScheme.primaryContainer,
+        colorScheme.tertiaryContainer,
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      accentColor: colorScheme.onPrimaryContainer,
+      badgeColor: colorScheme.surface,
+      badgeForeground: colorScheme.onSurface,
+      overlayColor: colorScheme.onPrimaryContainer,
+    ),
+  };
+}
+
+String _clientBranchLabel(AppLocalizations l10n, ClientType type) {
+  return switch (type) {
+    ClientType.retail => l10n.dashboardClientTypeRetail,
+    ClientType.classic => l10n.dashboardClientTypeClassic,
+    ClientType.ptr => l10n.dashboardClientTypePtr,
+    ClientType.legacy => l10n.dashboardClientTypeLegacy,
+    ClientType.unknown => l10n.dashboardClientTypeUnknown,
+  };
+}
+
+class _ClientVisualBanner extends StatelessWidget {
+  final _ClientVisualSpec spec;
+  final BorderRadius borderRadius;
+  final bool compact;
+
+  const _ClientVisualBanner({
+    required this.spec,
+    required this.borderRadius,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: spec.gradientColors,
+                begin: spec.begin,
+                end: spec.end,
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.white.withValues(alpha: compact ? 0.08 : 0.12),
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: compact ? 0.08 : 0.12),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: compact ? -32 : -40,
+            right: compact ? -24 : -30,
+            child: Container(
+              width: compact ? 112 : 144,
+              height: compact ? 112 : 144,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: spec.overlayColor.withValues(
+                  alpha: compact ? 0.08 : 0.1,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: compact ? -30 : -38,
+            bottom: compact ? -56 : -68,
+            child: Container(
+              width: compact ? 128 : 160,
+              height: compact ? 128 : 160,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: compact ? 0.04 : 0.06),
+              ),
+            ),
+          ),
+          if (spec.assetPath != null)
+            _OptionalClientBannerAsset(
+              assetPath: spec.assetPath!,
+              opacity: compact ? 0.2 : 0.28,
+            ),
+          Positioned(
+            right: compact ? 18 : 20,
+            bottom: compact ? 10 : 14,
+            child: Icon(
+              spec.emblemIcon,
+              size: compact ? 56 : 72,
+              color: spec.overlayColor.withValues(alpha: compact ? 0.14 : 0.18),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OptionalClientBannerAsset extends StatelessWidget {
+  final String assetPath;
+  final double opacity;
+
+  const _OptionalClientBannerAsset({
+    required this.assetPath,
+    required this.opacity,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Set<String>>(
+      future: _loadClientCardAssetManifest(),
+      builder: (context, snapshot) {
+        final availableAssets = snapshot.data;
+        if (availableAssets == null || !availableAssets.contains(assetPath)) {
+          return const SizedBox.shrink();
+        }
+
+        return Opacity(
+          opacity: opacity,
+          child: Image.asset(
+            assetPath,
+            fit: BoxFit.cover,
+            filterQuality: FilterQuality.low,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ClientEraMedallion extends StatelessWidget {
+  final _ClientVisualSpec spec;
+  final double size;
+
+  const _ClientEraMedallion({required this.spec, this.size = 54});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(size * 0.36),
+        color: spec.badgeColor.withValues(alpha: 0.96),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.22),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Icon(
+        spec.emblemIcon,
+        color: spec.badgeForeground,
+        size: size * 0.46,
+      ),
+    );
+  }
+}
+
+class _ClientPathLine extends StatelessWidget {
+  final String path;
+
+  const _ClientPathLine({required this.path});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Tooltip(
+      message: path,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: colorScheme.outlineVariant.withValues(alpha: 0.28),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.folder_open_rounded,
+              size: 18,
+              color: colorScheme.primary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                path,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ClientCard extends ConsumerWidget {
   final GameClient client;
   const _ClientCard({required this.client});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final locale = ref.watch(appSettingsProvider).locale.languageCode;
+    final l10n = AppLocalizations.of(context)!;
     final colorScheme = Theme.of(context).colorScheme;
+    final spec = _buildClientVisualSpec(client, colorScheme);
+    final displayName = client.resolvedDisplayName;
+    final eraLabel = client.defaultDisplayName.split(' (').first;
+    void onOpen() {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ClientDetailsScreen(client: client),
+        ),
+      );
+    }
 
     return Card(
       elevation: 0,
@@ -515,93 +996,184 @@ class _ClientCard extends ConsumerWidget {
         ),
       ),
       child: InkWell(
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => ClientDetailsScreen(client: client),
-          ),
-        ),
+        onTap: onOpen,
         borderRadius: BorderRadius.circular(28),
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              height: 110,
+              child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colorScheme.tertiaryContainer,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      client.type.name.toUpperCase(),
-                      style: TextStyle(
-                        color: colorScheme.onTertiaryContainer,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
+                  _ClientVisualBanner(
+                    spec: spec,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(28),
                     ),
                   ),
-                  Text(
-                    '${AppLocalizationsStub.versionLabel(locale)} ${client.version}',
-                    style: TextStyle(
-                      color: colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 16, 14, 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  _ClientHeroBadge(
+                                    label: _clientBranchLabel(
+                                      l10n,
+                                      client.type,
+                                    ),
+                                    backgroundColor: Colors.black.withValues(
+                                      alpha: 0.18,
+                                    ),
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  _ClientHeroBadge(
+                                    label: client.version,
+                                    backgroundColor: spec.badgeColor.withValues(
+                                      alpha: 0.96,
+                                    ),
+                                    foregroundColor: spec.badgeForeground,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton.filledTonal(
+                              tooltip: l10n.dashboardRenameClient,
+                              onPressed: () => _promptRenameClient(
+                                context,
+                                ref,
+                                client,
+                                Localizations.localeOf(context).languageCode,
+                              ),
+                              style: IconButton.styleFrom(
+                                backgroundColor: Colors.black.withValues(
+                                  alpha: 0.18,
+                                ),
+                                foregroundColor: Colors.white,
+                              ),
+                              icon: const Icon(Icons.edit_outlined),
+                            ),
+                          ],
+                        ),
+                        const Spacer(),
+                        Text(
+                          eraLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.4,
+                              ),
+                        ),
+                      ],
                     ),
-                  ),
-                  IconButton(
-                    tooltip: AppLocalizationsStub.renameClient(locale),
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () =>
-                        _promptRenameClient(context, ref, client, locale),
-                    icon: const Icon(Icons.edit_outlined),
                   ),
                 ],
               ),
-              const Spacer(),
-              Text(
-                client.resolvedDisplayName,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                client.path,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _ClientEraMedallion(spec: spec, size: 50),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                displayName,
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.4,
+                                    ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                l10n.dashboardClientLocation,
+                                style: Theme.of(context).textTheme.labelMedium
+                                    ?.copyWith(
+                                      color: colorScheme.primary,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.2,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    _ClientPathLine(path: client.path),
+                    const Spacer(),
+                    FilledButton.icon(
+                      onPressed: onOpen,
+                      icon: const Icon(Icons.extension_rounded),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: spec.badgeColor,
+                        foregroundColor: spec.badgeForeground,
+                        minimumSize: const Size.fromHeight(46),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      label: Text(l10n.dashboardManageAddons),
+                    ),
+                  ],
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ClientDetailsScreen(client: client),
-                  ),
-                ),
-                style: FilledButton.styleFrom(
-                  backgroundColor: colorScheme.primary,
-                  foregroundColor: colorScheme.onPrimary,
-                  minimumSize: const Size(double.infinity, 44),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: Text(AppLocalizationsStub.manageAddons(locale)),
-              ),
-            ],
-          ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ClientHeroBadge extends StatelessWidget {
+  final String label;
+  final Color backgroundColor;
+  final Color foregroundColor;
+
+  const _ClientHeroBadge({
+    required this.label,
+    required this.backgroundColor,
+    required this.foregroundColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          color: foregroundColor,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.2,
         ),
       ),
     );
@@ -728,6 +1300,7 @@ class _ClientDetailsScreenState extends ConsumerState<ClientDetailsScreen> {
               child: Padding(
                 padding: const EdgeInsets.only(bottom: 40.0),
                 child: _ClientDetailsNavBar(
+                  client: _client,
                   currentIndex: _currentIndex,
                   onTap: _onNavTap,
                 ),
@@ -741,14 +1314,20 @@ class _ClientDetailsScreenState extends ConsumerState<ClientDetailsScreen> {
 }
 
 class _ClientDetailsNavBar extends StatelessWidget {
+  final GameClient client;
   final int currentIndex;
   final ValueChanged<int> onTap;
 
-  const _ClientDetailsNavBar({required this.currentIndex, required this.onTap});
+  const _ClientDetailsNavBar({
+    required this.client,
+    required this.currentIndex,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final spec = _buildClientVisualSpec(client, colorScheme);
     return RepaintBoundary(
       child: Container(
         padding: const EdgeInsets.all(8),
@@ -772,11 +1351,15 @@ class _ClientDetailsNavBar extends StatelessWidget {
             _DetailsNavItem(
               icon: Icons.inventory_2_rounded,
               isSelected: currentIndex == 0,
+              selectedBackgroundColor: spec.badgeColor,
+              selectedForegroundColor: spec.badgeForeground,
               onTap: () => onTap(0),
             ),
             _DetailsNavItem(
               icon: Icons.search_rounded,
               isSelected: currentIndex == 1,
+              selectedBackgroundColor: spec.badgeColor,
+              selectedForegroundColor: spec.badgeForeground,
               onTap: () => onTap(1),
             ),
           ],
@@ -789,11 +1372,15 @@ class _ClientDetailsNavBar extends StatelessWidget {
 class _DetailsNavItem extends StatelessWidget {
   final IconData icon;
   final bool isSelected;
+  final Color selectedBackgroundColor;
+  final Color selectedForegroundColor;
   final VoidCallback onTap;
 
   const _DetailsNavItem({
     required this.icon,
     required this.isSelected,
+    required this.selectedBackgroundColor,
+    required this.selectedForegroundColor,
     required this.onTap,
   });
 
@@ -813,14 +1400,14 @@ class _DetailsNavItem extends StatelessWidget {
             width: isSelected ? 64 : 48,
             height: 48,
             decoration: BoxDecoration(
-              color: isSelected ? colorScheme.primary : Colors.transparent,
+              color: isSelected ? selectedBackgroundColor : Colors.transparent,
               borderRadius: BorderRadius.circular(32),
             ),
             child: Center(
               child: Icon(
                 icon,
                 color: isSelected
-                    ? colorScheme.onPrimary
+                    ? selectedForegroundColor
                     : colorScheme.onSurfaceVariant,
                 size: 24,
               ),
@@ -1297,19 +1884,7 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
                               onLongPress: () => _toggleSelection(addon.id),
                               child: Row(
                                 children: [
-                                  CircleAvatar(
-                                    backgroundColor: addon.isManaged
-                                        ? colorScheme.primaryContainer
-                                        : colorScheme.secondaryContainer,
-                                    child: Icon(
-                                      addon.isManaged
-                                          ? Icons.cloud_done_rounded
-                                          : Icons.folder_rounded,
-                                      color: addon.isManaged
-                                          ? colorScheme.onPrimaryContainer
-                                          : colorScheme.onSecondaryContainer,
-                                    ),
-                                  ),
+                                  _InstalledAddonGroupThumbnail(group: addon),
                                   const SizedBox(width: 14),
                                   Expanded(
                                     child: Column(
@@ -1324,6 +1899,8 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
                                               ?.copyWith(
                                                 fontWeight: FontWeight.w700,
                                               ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
                                         ),
                                         const SizedBox(height: 6),
                                         Wrap(
@@ -1777,40 +2354,121 @@ class _ClientHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final colorScheme = Theme.of(context).colorScheme;
-    final locale = Localizations.localeOf(context).languageCode;
+    final spec = _buildClientVisualSpec(client, colorScheme);
+    final eraLabel = client.defaultDisplayName.split(' (').first;
 
     return RepaintBoundary(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Container(
-          padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             color: colorScheme.surfaceContainerHigh,
             borderRadius: BorderRadius.circular(28),
+            border: Border.all(
+              color: colorScheme.outlineVariant.withValues(alpha: 0.35),
+            ),
           ),
-          child: Row(
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const AppLogoWidget(size: 48),
-              const SizedBox(width: 16),
-              Expanded(
+              SizedBox(
+                height: 126,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _ClientVisualBanner(
+                      spec: spec,
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(28),
+                      ),
+                      compact: true,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _ClientHeroBadge(
+                                label: _clientBranchLabel(l10n, client.type),
+                                backgroundColor: Colors.black.withValues(
+                                  alpha: 0.18,
+                                ),
+                                foregroundColor: Colors.white,
+                              ),
+                              _ClientHeroBadge(
+                                label: client.version,
+                                backgroundColor: spec.badgeColor.withValues(
+                                  alpha: 0.96,
+                                ),
+                                foregroundColor: spec.badgeForeground,
+                              ),
+                            ],
+                          ),
+                          const Spacer(),
+                          Text(
+                            eraLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.headlineSmall
+                                ?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.4,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      '${AppLocalizationsStub.versionLabel(locale)} ${client.version}',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _ClientEraMedallion(spec: spec, size: 54),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                client.resolvedDisplayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.4,
+                                    ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${_clientBranchLabel(l10n, client.type)} · ${client.version}',
+                                style: Theme.of(context).textTheme.labelMedium
+                                    ?.copyWith(
+                                      color: colorScheme.primary,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                    Text(
-                      client.path,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    const SizedBox(height: 16),
+                    _ClientPathLine(path: client.path),
                   ],
                 ),
               ),
@@ -2378,8 +3036,14 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
 
 class _AddonThumbnail extends StatelessWidget {
   final String? url;
+  final double size;
+  final double borderRadius;
 
-  const _AddonThumbnail({required this.url});
+  const _AddonThumbnail({
+    required this.url,
+    this.size = 64,
+    this.borderRadius = 12,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -2387,21 +3051,29 @@ class _AddonThumbnail extends StatelessWidget {
     final normalizedUrl = url?.trim() ?? '';
 
     if (normalizedUrl.isEmpty) {
-      return _AddonThumbnailPlaceholder(colorScheme: colorScheme);
+      return _AddonThumbnailPlaceholder(
+        colorScheme: colorScheme,
+        size: size,
+        borderRadius: borderRadius,
+      );
     }
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(borderRadius),
       child: Image.network(
         normalizedUrl,
-        width: 64,
-        height: 64,
-        cacheWidth: 128,
-        cacheHeight: 128,
+        width: size,
+        height: size,
+        cacheWidth: (size * 2).round(),
+        cacheHeight: (size * 2).round(),
         fit: BoxFit.cover,
         filterQuality: FilterQuality.low,
         errorBuilder: (context, error, stackTrace) =>
-            _AddonThumbnailPlaceholder(colorScheme: colorScheme),
+            _AddonThumbnailPlaceholder(
+              colorScheme: colorScheme,
+              size: size,
+              borderRadius: borderRadius,
+            ),
       ),
     );
   }
@@ -2409,19 +3081,70 @@ class _AddonThumbnail extends StatelessWidget {
 
 class _AddonThumbnailPlaceholder extends StatelessWidget {
   final ColorScheme colorScheme;
+  final double size;
+  final double borderRadius;
 
-  const _AddonThumbnailPlaceholder({required this.colorScheme});
+  const _AddonThumbnailPlaceholder({
+    required this.colorScheme,
+    this.size = 64,
+    this.borderRadius = 12,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 64,
-      height: 64,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(borderRadius),
       ),
-      child: Icon(Icons.extension_rounded, color: colorScheme.onSurfaceVariant),
+      child: Icon(
+        Icons.extension_rounded,
+        color: colorScheme.onSurfaceVariant,
+        size: size * 0.42,
+      ),
+    );
+  }
+}
+
+class _InstalledAddonGroupThumbnail extends StatelessWidget {
+  final InstalledAddonGroup group;
+
+  const _InstalledAddonGroupThumbnail({required this.group});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isManaged = group.isManaged;
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        _AddonThumbnail(url: group.thumbnailUrl, size: 52, borderRadius: 16),
+        Positioned(
+          right: -4,
+          bottom: -4,
+          child: Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isManaged
+                  ? colorScheme.primaryContainer
+                  : colorScheme.secondaryContainer,
+              border: Border.all(color: colorScheme.surface, width: 2),
+            ),
+            child: Icon(
+              isManaged ? Icons.cloud_done_rounded : Icons.folder_rounded,
+              size: 13,
+              color: isManaged
+                  ? colorScheme.onPrimaryContainer
+                  : colorScheme.onSecondaryContainer,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2471,413 +3194,363 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  final PageController _pageController = PageController();
-  int _currentIndex = 0;
+  _SettingsWorkspaceSection _currentSection =
+      _SettingsWorkspaceSection.appearance;
 
-  void _onNavTap(int index) {
-    setState(() => _currentIndex = index);
-    _pageController.animateToPage(
-      index,
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeOutCubic,
-    );
-  }
+  void _selectSection(_SettingsWorkspaceSection section) {
+    if (_currentSection == section) {
+      return;
+    }
 
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
+    setState(() => _currentSection = section);
   }
 
   @override
   Widget build(BuildContext context) {
-    final locale = ref.watch(appSettingsProvider).locale.languageCode;
-
-    final titles = [
-      AppLocalizationsStub.interfaceSection(locale),
-      AppLocalizationsStub.wowClientsSection(locale),
-      AppLocalizationsStub.downloadsSection(locale),
-      AppLocalizationsStub.aboutSection(locale),
+    final l10n = AppLocalizations.of(context)!;
+    final sections = <_SettingsWorkspaceSectionMeta>[
+      _SettingsWorkspaceSectionMeta(
+        section: _SettingsWorkspaceSection.appearance,
+        icon: AppIcons.appearance,
+        title: l10n.settingsAppearanceTitle,
+        subtitle: l10n.settingsAppearanceSubtitle,
+      ),
+      _SettingsWorkspaceSectionMeta(
+        section: _SettingsWorkspaceSection.application,
+        icon: AppIcons.application,
+        title: l10n.settingsApplicationTitle,
+        subtitle: l10n.settingsApplicationSubtitle,
+      ),
+      _SettingsWorkspaceSectionMeta(
+        section: _SettingsWorkspaceSection.about,
+        icon: AppIcons.info,
+        title: l10n.settingsAboutTitle,
+        subtitle: l10n.settingsAboutSubtitle,
+      ),
     ];
+    final currentSection = sections.firstWhere(
+      (section) => section.section == _currentSection,
+    );
 
     return Scaffold(
       appBar: AppBar(
-        title: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          child: Text(titles[_currentIndex], key: ValueKey(_currentIndex)),
-        ),
+        title: Text(l10n.settingsTitle),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded),
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: Stack(
-        children: [
-          PageView(
-            controller: _pageController,
-            physics: const NeverScrollableScrollPhysics(),
-            onPageChanged: (index) => setState(() => _currentIndex = index),
-            children: const [
-              _InterfaceSettingsView(),
-              _EmptySectionPlaceholder(icon: Icons.videogame_asset_outlined),
-              _EmptySectionPlaceholder(icon: Icons.download_rounded),
-              _AboutSettingsView(),
-            ],
-          ),
-          Align(
-            alignment: Alignment.bottomCenter,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 1040;
+          final content = AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            child: KeyedSubtree(
+              key: ValueKey(_currentSection),
+              child: switch (_currentSection) {
+                _SettingsWorkspaceSection.appearance =>
+                  const _AppearanceSettingsView(),
+                _SettingsWorkspaceSection.application =>
+                  const _ApplicationSettingsView(),
+                _SettingsWorkspaceSection.about => const _AboutSettingsView(),
+              },
+            ),
+          );
+
+          return SafeArea(
             child: Padding(
-              padding: const EdgeInsets.only(bottom: 40.0),
-              child: _FloatingNavBar(
-                currentIndex: _currentIndex,
-                onTap: _onNavTap,
-              ),
+              padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+              child: isWide
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: 308,
+                          child: _SettingsWorkspaceSidebar(
+                            sections: sections,
+                            currentSection: _currentSection,
+                            onSelected: _selectSection,
+                          ),
+                        ),
+                        const SizedBox(width: 24),
+                        Expanded(child: content),
+                      ],
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _SettingsWorkspaceCompactNav(
+                          sections: sections,
+                          currentSection: _currentSection,
+                          onSelected: _selectSection,
+                        ),
+                        const SizedBox(height: 18),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                currentSection.title,
+                                style: Theme.of(context).textTheme.headlineSmall
+                                    ?.copyWith(fontWeight: FontWeight.w800),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                currentSection.subtitle,
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                              ),
+                              const SizedBox(height: 18),
+                              Expanded(child: content),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
 }
 
-class _EmptySectionPlaceholder extends StatelessWidget {
+class _SettingsWorkspaceSectionMeta {
+  final _SettingsWorkspaceSection section;
   final IconData icon;
+  final String title;
+  final String subtitle;
 
-  const _EmptySectionPlaceholder({required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            icon,
-            size: 80,
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'Section WIP',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              color: Theme.of(context).colorScheme.outline,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _FloatingNavBar extends StatelessWidget {
-  final int currentIndex;
-  final ValueChanged<int> onTap;
-
-  const _FloatingNavBar({required this.currentIndex, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return RepaintBoundary(
-      child: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(44),
-          border: Border.all(
-            color: colorScheme.outlineVariant.withValues(alpha: 0.1),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: colorScheme.shadow.withValues(alpha: 0.08),
-              blurRadius: 12,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _NavItem(
-              icon: AppIcons.interface,
-              isSelected: currentIndex == 0,
-              onTap: () => onTap(0),
-            ),
-            _NavItem(
-              icon: AppIcons.wow,
-              isSelected: currentIndex == 1,
-              onTap: () => onTap(1),
-            ),
-            _NavItem(
-              icon: AppIcons.downloads,
-              isSelected: currentIndex == 2,
-              onTap: () => onTap(2),
-            ),
-            _NavItem(
-              icon: AppIcons.info,
-              isSelected: currentIndex == 3,
-              onTap: () => onTap(3),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _NavItem extends StatelessWidget {
-  final IconData icon;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _NavItem({
+  const _SettingsWorkspaceSectionMeta({
+    required this.section,
     required this.icon,
-    required this.isSelected,
-    required this.onTap,
+    required this.title,
+    required this.subtitle,
   });
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4.0),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(32),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOutCubic,
-            width: isSelected ? 64 : 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: isSelected ? colorScheme.primary : Colors.transparent,
-              borderRadius: BorderRadius.circular(32),
-            ),
-            child: Center(
-              child: Icon(
-                icon,
-                size: 24,
-                color: isSelected
-                    ? colorScheme.onPrimary
-                    : colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
-class _InterfaceSettingsView extends ConsumerWidget {
-  const _InterfaceSettingsView();
+class _SettingsWorkspaceSidebar extends StatelessWidget {
+  final List<_SettingsWorkspaceSectionMeta> sections;
+  final _SettingsWorkspaceSection currentSection;
+  final ValueChanged<_SettingsWorkspaceSection> onSelected;
 
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final settings = ref.watch(appSettingsProvider);
-    final notifier = ref.read(appSettingsProvider.notifier);
-    final locale = settings.locale.languageCode;
-
-    final List<Color> availableColors = [
-      const Color(0xFF6750A4),
-      const Color(0xFF0061A4),
-      const Color(0xFF006E1C),
-      const Color(0xFF914D00),
-      const Color(0xFF9C4275),
-      const Color(0xFF006A6A),
-    ];
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 140),
-      children: [
-        _SettingsGroup(
-          title: AppLocalizationsStub.languageSection(locale),
-          child: Row(
-            children: [
-              Expanded(
-                child: _ChoiceChip<String>(
-                  label: 'Русский',
-                  value: 'ru',
-                  groupValue: locale,
-                  onSelected: (val) => notifier.setLocale(const Locale('ru')),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _ChoiceChip<String>(
-                  label: 'English',
-                  value: 'en',
-                  groupValue: locale,
-                  onSelected: (val) => notifier.setLocale(const Locale('en')),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
-        _SettingsGroup(
-          title: AppLocalizationsStub.themeModeLabel(locale),
-          child: Row(
-            children: [
-              _ThemeOption(
-                icon: Icons.light_mode_rounded,
-                isSelected: settings.themeMode == ThemeMode.light,
-                onTap: () => notifier.setThemeMode(ThemeMode.light),
-              ),
-              const SizedBox(width: 12),
-              _ThemeOption(
-                icon: Icons.settings_brightness_rounded,
-                isSelected: settings.themeMode == ThemeMode.system,
-                onTap: () => notifier.setThemeMode(ThemeMode.system),
-              ),
-              const SizedBox(width: 12),
-              _ThemeOption(
-                icon: Icons.dark_mode_rounded,
-                isSelected: settings.themeMode == ThemeMode.dark,
-                onTap: () => notifier.setThemeMode(ThemeMode.dark),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
-        _SettingsGroup(
-          title: AppLocalizationsStub.colorSchemeLabel(locale),
-          child: Wrap(
-            spacing: 16,
-            runSpacing: 16,
-            children: availableColors.map((color) {
-              final isSelected = settings.seedColor == color;
-              return GestureDetector(
-                onTap: () => notifier.setSeedColor(color),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    color: color,
-                    shape: BoxShape.circle,
-                    border: isSelected
-                        ? Border.all(
-                            color: Theme.of(context).colorScheme.outline,
-                            width: 4,
-                          )
-                        : null,
-                    boxShadow: isSelected
-                        ? [
-                            BoxShadow(
-                              color: color.withValues(alpha: 0.28),
-                              blurRadius: 10,
-                              spreadRadius: 1.5,
-                            ),
-                          ]
-                        : null,
-                  ),
-                  child: isSelected
-                      ? const Icon(
-                          Icons.check_rounded,
-                          color: Colors.white,
-                          size: 32,
-                        )
-                      : null,
-                ),
-              );
-            }).toList(),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ChoiceChip<T> extends StatelessWidget {
-  final String label;
-  final T value;
-  final T groupValue;
-  final ValueChanged<T> onSelected;
-
-  const _ChoiceChip({
-    required this.label,
-    required this.value,
-    required this.groupValue,
+  const _SettingsWorkspaceSidebar({
+    required this.sections,
+    required this.currentSection,
     required this.onSelected,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isSelected = value == groupValue;
     final colorScheme = Theme.of(context).colorScheme;
+    final l10n = AppLocalizations.of(context)!;
 
-    return InkWell(
-      onTap: () => onSelected(value),
-      borderRadius: BorderRadius.circular(16),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? colorScheme.primary
-              : colorScheme.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isSelected
-                ? colorScheme.primary
-                : colorScheme.outlineVariant.withValues(alpha: 0.5),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                colorScheme.primaryContainer,
+                colorScheme.tertiaryContainer,
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(
+              color: colorScheme.outlineVariant.withValues(alpha: 0.35),
+            ),
+          ),
+          child: Row(
+            children: [
+              const AppLogoWidget(size: 54),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l10n.appTitle,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      l10n.settingsTitle,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-        child: Center(
-          child: Text(
-            label,
-            style: TextStyle(
-              color: isSelected ? colorScheme.onPrimary : colorScheme.onSurface,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        const SizedBox(height: 16),
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(
+                color: colorScheme.outlineVariant.withValues(alpha: 0.35),
+              ),
+            ),
+            child: Column(
+              children: [
+                for (final section in sections) ...[
+                  _SettingsWorkspaceSectionButton(
+                    icon: section.icon,
+                    title: section.title,
+                    subtitle: section.subtitle,
+                    selected: currentSection == section.section,
+                    onTap: () => onSelected(section.section),
+                  ),
+                  if (section != sections.last) const SizedBox(height: 10),
+                ],
+              ],
             ),
           ),
         ),
+      ],
+    );
+  }
+}
+
+class _SettingsWorkspaceCompactNav extends StatelessWidget {
+  final List<_SettingsWorkspaceSectionMeta> sections;
+  final _SettingsWorkspaceSection currentSection;
+  final ValueChanged<_SettingsWorkspaceSection> onSelected;
+
+  const _SettingsWorkspaceCompactNav({
+    required this.sections,
+    required this.currentSection,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final section in sections)
+            _SettingsWorkspaceCompactChip(
+              icon: section.icon,
+              label: section.title,
+              selected: currentSection == section.section,
+              onTap: () => onSelected(section.section),
+            ),
+        ],
       ),
     );
   }
 }
 
-class _ThemeOption extends StatelessWidget {
+class _SettingsWorkspaceSectionButton extends StatelessWidget {
   final IconData icon;
-  final bool isSelected;
+  final String title;
+  final String subtitle;
+  final bool selected;
   final VoidCallback onTap;
 
-  const _ThemeOption({
+  const _SettingsWorkspaceSectionButton({
     required this.icon,
-    required this.isSelected,
+    required this.title,
+    required this.subtitle,
+    required this.selected,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Expanded(
+
+    return Material(
+      color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(22),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 16),
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: isSelected
-                ? colorScheme.secondaryContainer
-                : colorScheme.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(16),
+            color: selected
+                ? colorScheme.primaryContainer.withValues(alpha: 0.9)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(22),
             border: Border.all(
-              color: isSelected
-                  ? colorScheme.secondary
-                  : colorScheme.outlineVariant.withValues(alpha: 0.5),
+              color: selected
+                  ? colorScheme.primary.withValues(alpha: 0.34)
+                  : colorScheme.outlineVariant.withValues(alpha: 0.15),
             ),
           ),
-          child: Icon(
-            icon,
-            color: isSelected
-                ? colorScheme.onSecondaryContainer
-                : colorScheme.onSurfaceVariant,
-            size: 28,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: selected
+                      ? colorScheme.primary
+                      : colorScheme.surfaceContainerHighest,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  icon,
+                  color: selected
+                      ? colorScheme.onPrimary
+                      : colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -2885,116 +3558,814 @@ class _ThemeOption extends StatelessWidget {
   }
 }
 
-class _SettingsGroup extends StatelessWidget {
-  final String title;
-  final Widget child;
+class _SettingsWorkspaceCompactChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
 
-  const _SettingsGroup({required this.title, required this.child});
+  const _SettingsWorkspaceCompactChip({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 12),
-          child: Text(
-            title,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.2,
-            ),
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? colorScheme.primary
+                : colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(999),
           ),
-        ),
-        child,
-      ],
-    );
-  }
-}
-
-class _AboutSettingsView extends ConsumerWidget {
-  const _AboutSettingsView();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final locale = ref.watch(appSettingsProvider).locale.languageCode;
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 140),
-      children: [
-        Center(
-          child: Column(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              const AppLogoWidget(size: 160),
-              const SizedBox(height: 32),
-              Text(
-                AppLocalizationsStub.appTitle(locale),
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: -0.5,
-                ),
+              Icon(
+                icon,
+                size: 18,
+                color: selected
+                    ? colorScheme.onPrimary
+                    : colorScheme.onSurfaceVariant,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(width: 8),
               Text(
-                '${AppLocalizationsStub.versionLabel(locale)}: 1.0.0',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                label,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: selected
+                      ? colorScheme.onPrimary
+                      : colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 48),
-        _SettingsGroup(
-          title: AppLocalizationsStub.developerLabel(locale),
-          child: Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerLow,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(
-                color: Theme.of(
-                  context,
-                ).colorScheme.outlineVariant.withValues(alpha: 0.5),
-              ),
+      ),
+    );
+  }
+}
+
+class _SettingsSectionHeader extends StatelessWidget {
+  final String title;
+  final String subtitle;
+
+  const _SettingsSectionHeader({required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.5,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          subtitle,
+          style: Theme.of(
+            context,
+          ).textTheme.bodyLarge?.copyWith(color: colorScheme.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+}
+
+class _SettingsSurfaceCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Widget child;
+
+  const _SettingsSurfaceCard({
+    required this.title,
+    required this.subtitle,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.4,
             ),
-            child: Row(
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 20),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _AppearanceSettingsView extends ConsumerWidget {
+  const _AppearanceSettingsView();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(appSettingsProvider);
+    final notifier = ref.read(appSettingsProvider.notifier);
+    final l10n = AppLocalizations.of(context)!;
+
+    final palettes = <_AccentPaletteOption>[
+      _AccentPaletteOption(
+        label: l10n.settingsAccentOrchid,
+        color: const Color(0xFF6750A4),
+      ),
+      _AccentPaletteOption(
+        label: l10n.settingsAccentLagoon,
+        color: const Color(0xFF0061A4),
+      ),
+      _AccentPaletteOption(
+        label: l10n.settingsAccentGrove,
+        color: const Color(0xFF006E1C),
+      ),
+      _AccentPaletteOption(
+        label: l10n.settingsAccentEmber,
+        color: const Color(0xFF914D00),
+      ),
+      _AccentPaletteOption(
+        label: l10n.settingsAccentCoral,
+        color: const Color(0xFF9C4275),
+      ),
+      _AccentPaletteOption(
+        label: l10n.settingsAccentTide,
+        color: const Color(0xFF006A6A),
+      ),
+    ];
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
+      children: [
+        _SettingsSectionHeader(
+          title: l10n.settingsAppearanceTitle,
+          subtitle: l10n.settingsAppearanceSubtitle,
+        ),
+        const SizedBox(height: 20),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide = constraints.maxWidth >= 960;
+            final settingsColumn = Column(
               children: [
-                CircleAvatar(
-                  radius: 28,
-                  backgroundColor: Theme.of(
-                    context,
-                  ).colorScheme.primaryContainer,
-                  child: Icon(
-                    Icons.person_rounded,
-                    color: Theme.of(context).colorScheme.onPrimaryContainer,
-                    size: 32,
+                _SettingsSurfaceCard(
+                  title: l10n.settingsThemeModeTitle,
+                  subtitle: l10n.settingsThemeModeSubtitle,
+                  child: SegmentedButton<ThemeMode>(
+                    showSelectedIcon: false,
+                    segments: [
+                      ButtonSegment<ThemeMode>(
+                        value: ThemeMode.light,
+                        icon: const Icon(Icons.light_mode_rounded),
+                        label: Text(l10n.themeLight),
+                      ),
+                      ButtonSegment<ThemeMode>(
+                        value: ThemeMode.system,
+                        icon: const Icon(Icons.brightness_auto_rounded),
+                        label: Text(l10n.themeSystem),
+                      ),
+                      ButtonSegment<ThemeMode>(
+                        value: ThemeMode.dark,
+                        icon: const Icon(Icons.dark_mode_rounded),
+                        label: Text(l10n.themeDark),
+                      ),
+                    ],
+                    selected: <ThemeMode>{settings.themeMode},
+                    onSelectionChanged: (selection) {
+                      if (selection.isNotEmpty) {
+                        notifier.setThemeMode(selection.first);
+                      }
+                    },
                   ),
                 ),
-                const SizedBox(width: 20),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                const SizedBox(height: 16),
+                _SettingsSurfaceCard(
+                  title: l10n.settingsAccentTitle,
+                  subtitle: l10n.settingsAccentSubtitle,
+                  child: Wrap(
+                    spacing: 14,
+                    runSpacing: 14,
+                    children: [
+                      for (final palette in palettes)
+                        _AccentPaletteTile(
+                          option: palette,
+                          selected:
+                              settings.seedColor.toARGB32() ==
+                              palette.color.toARGB32(),
+                          onTap: () => notifier.setSeedColor(palette.color),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+
+            final previewCard = _SettingsSurfaceCard(
+              title: l10n.settingsPreviewTitle,
+              subtitle: l10n.settingsPreviewSubtitle,
+              child: _ThemePreviewSurface(settings: settings),
+            );
+
+            if (!isWide) {
+              return Column(
+                children: [
+                  settingsColumn,
+                  const SizedBox(height: 16),
+                  previewCard,
+                ],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(flex: 11, child: settingsColumn),
+                const SizedBox(width: 16),
+                Expanded(flex: 9, child: previewCard),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _ApplicationSettingsView extends ConsumerWidget {
+  const _ApplicationSettingsView();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(appSettingsProvider);
+    final notifier = ref.read(appSettingsProvider.notifier);
+    final l10n = AppLocalizations.of(context)!;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
+      children: [
+        _SettingsSectionHeader(
+          title: l10n.settingsApplicationTitle,
+          subtitle: l10n.settingsApplicationSubtitle,
+        ),
+        const SizedBox(height: 20),
+        _SettingsSurfaceCard(
+          title: l10n.settingsLanguageTitle,
+          subtitle: l10n.settingsLanguageSubtitle,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SegmentedButton<String>(
+                showSelectedIcon: false,
+                segments: [
+                  ButtonSegment<String>(
+                    value: 'ru',
+                    icon: const Icon(Icons.translate_rounded),
+                    label: Text(l10n.settingsLanguageRussian),
+                  ),
+                  ButtonSegment<String>(
+                    value: 'en',
+                    icon: const Icon(Icons.language_rounded),
+                    label: Text(l10n.settingsLanguageEnglish),
+                  ),
+                ],
+                selected: <String>{settings.locale.languageCode},
+                onSelectionChanged: (selection) {
+                  if (selection.isNotEmpty) {
+                    notifier.setLocale(Locale(selection.first));
+                  }
+                },
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
                   children: [
-                    Text(
-                      'WoW QAddOns Team',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primaryContainer,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.g_translate_rounded,
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
                       ),
                     ),
-                    Text(
-                      'Open Source Developers',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.outline,
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Text(
+                        settings.locale.languageCode == 'ru'
+                            ? l10n.settingsLanguageRussian
+                            : l10n.settingsLanguageEnglish,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ],
+    );
+  }
+}
+
+class _AccentPaletteOption {
+  final String label;
+  final Color color;
+
+  const _AccentPaletteOption({required this.label, required this.color});
+}
+
+class _AccentPaletteTile extends StatelessWidget {
+  final _AccentPaletteOption option;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _AccentPaletteTile({
+    required this.option,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final samples = <Color>[
+      option.color,
+      Color.lerp(option.color, Colors.white, 0.45)!,
+      Color.lerp(option.color, Colors.black, 0.18)!,
+    ];
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(22),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          width: 168,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: selected
+                ? option.color.withValues(alpha: 0.16)
+                : colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: selected
+                  ? option.color
+                  : colorScheme.outlineVariant.withValues(alpha: 0.24),
+              width: selected ? 1.6 : 1,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: option.color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      option.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  if (selected)
+                    Icon(Icons.check_circle_rounded, color: option.color),
+                ],
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  for (var index = 0; index < samples.length; index++) ...[
+                    Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: samples[index],
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                    if (index < samples.length - 1) const SizedBox(width: 8),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AboutSettingsView extends StatelessWidget {
+  const _AboutSettingsView();
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
+      children: [
+        _SettingsSectionHeader(
+          title: l10n.settingsAboutTitle,
+          subtitle: l10n.settingsAboutSubtitle,
+        ),
+        const SizedBox(height: 20),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide = constraints.maxWidth >= 960;
+            final heroCard = Container(
+              padding: const EdgeInsets.all(28),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    colorScheme.primaryContainer,
+                    colorScheme.secondaryContainer,
+                    colorScheme.tertiaryContainer,
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(32),
+                border: Border.all(
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.35),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const AppLogoWidget(size: 108),
+                  const SizedBox(height: 24),
+                  Text(
+                    l10n.appTitle,
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.7,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    l10n.aboutTagline,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      _SettingsInfoPill(
+                        icon: Icons.sell_outlined,
+                        label: '${l10n.aboutVersionTitle}: $kAppVersionLabel',
+                      ),
+                      _SettingsInfoPill(
+                        icon: Icons.person_outline_rounded,
+                        label: '${l10n.aboutDeveloperTitle}: Qurie',
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+
+            final supportCard = _SettingsSurfaceCard(
+              title: l10n.aboutSupportTitle,
+              subtitle: l10n.aboutSupportSubtitle,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 52,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: Icon(
+                            Icons.coffee_rounded,
+                            color: colorScheme.onPrimaryContainer,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Text(
+                            l10n.aboutSupportSubtitle,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: colorScheme.onSurfaceVariant),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: () =>
+                            _openExternalLink(context, kProjectGitHubUri),
+                        icon: const Icon(Icons.code_rounded),
+                        label: Text(l10n.aboutOpenGitHub),
+                      ),
+                      FilledButton.tonalIcon(
+                        onPressed: () =>
+                            _openExternalLink(context, kProjectBoostyUri),
+                        icon: const Icon(Icons.coffee_rounded),
+                        label: Text(l10n.aboutOpenBoosty),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+
+            if (!isWide) {
+              return Column(
+                children: [heroCard, const SizedBox(height: 16), supportCard],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(flex: 11, child: heroCard),
+                const SizedBox(width: 16),
+                Expanded(flex: 9, child: supportCard),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _ThemePreviewSurface extends StatelessWidget {
+  final AppSettingsState settings;
+
+  const _ThemePreviewSurface({required this.settings});
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final brightness = switch (settings.themeMode) {
+      ThemeMode.light => Brightness.light,
+      ThemeMode.dark => Brightness.dark,
+      ThemeMode.system => MediaQuery.platformBrightnessOf(context),
+    };
+    final previewTheme = AppTheme.createTheme(brightness, settings.seedColor);
+    final scheme = previewTheme.colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [scheme.primaryContainer, scheme.tertiaryContainer],
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  Icons.window_rounded,
+                  color: scheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l10n.settingsPreviewWindowTitle,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: scheme.onSurface,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      l10n.appTitle,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [scheme.primaryContainer, scheme.secondaryContainer],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _PreviewChip(
+                      label: l10n.settingsPreviewChip,
+                      backgroundColor: scheme.surface.withValues(alpha: 0.82),
+                      foregroundColor: scheme.onSurface,
+                    ),
+                    _PreviewChip(
+                      label: brightness == Brightness.dark
+                          ? l10n.themeDark
+                          : l10n.themeLight,
+                      backgroundColor: scheme.primary,
+                      foregroundColor: scheme.onPrimary,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  l10n.homeTitle,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: scheme.onSurface,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  l10n.settingsPreviewClientName,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                FilledButton.icon(
+                  onPressed: () {},
+                  style: FilledButton.styleFrom(
+                    backgroundColor: scheme.primary,
+                    foregroundColor: scheme.onPrimary,
+                  ),
+                  icon: const Icon(Icons.north_east_rounded),
+                  label: Text(l10n.settingsPreviewAction),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PreviewChip extends StatelessWidget {
+  final String label;
+  final Color backgroundColor;
+  final Color foregroundColor;
+
+  const _PreviewChip({
+    required this.label,
+    required this.backgroundColor,
+    required this.foregroundColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          color: foregroundColor,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsInfoPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _SettingsInfoPill({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: colorScheme.surface.withValues(alpha: 0.75),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.28),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: colorScheme.onSurfaceVariant),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ],
+      ),
     );
   }
 }

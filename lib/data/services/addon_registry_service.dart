@@ -14,20 +14,23 @@ class AddonRegistryService {
     List<InstalledAddonFolder> scannedFolders,
   ) async {
     final registryEntries = await _readRegistry(client);
-    final scannedMap = {for (final folder in scannedFolders) folder.folderName: folder};
+    final scannedMap = {
+      for (final folder in scannedFolders) folder.folderName: folder,
+    };
 
     final syncedManagedGroups = registryEntries
         .map((group) {
-          final existingFolders = group.installedFolders.where(scannedMap.containsKey).toList()..sort();
+          final existingFolders =
+              group.installedFolders.where(scannedMap.containsKey).toList()
+                ..sort();
           if (existingFolders.isEmpty) {
             return null;
           }
 
-          final folderDetails =
-              existingFolders
-                  .map((folderName) => scannedMap[folderName])
-                  .whereType<InstalledAddonFolder>()
-                  .toList(growable: false);
+          final folderDetails = existingFolders
+              .map((folderName) => scannedMap[folderName])
+              .whereType<InstalledAddonFolder>()
+              .toList(growable: false);
 
           return group.copyWith(
             displayName: group.displayName,
@@ -41,12 +44,19 @@ class AddonRegistryService {
 
     await _writeRegistry(client, syncedManagedGroups);
 
-    final managedFolders = syncedManagedGroups.expand((group) => group.installedFolders).toSet();
-    final manualFolders = scannedFolders.where((folder) => !managedFolders.contains(folder.folderName)).toList();
+    final managedFolders = syncedManagedGroups
+        .expand((group) => group.installedFolders)
+        .toSet();
+    final manualFolders = scannedFolders
+        .where((folder) => !managedFolders.contains(folder.folderName))
+        .toList();
     final manualGroups = _buildManualGroups(manualFolders);
 
     final groups = [...syncedManagedGroups, ...manualGroups];
-    groups.sort((a, b) => a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()));
+    groups.sort(
+      (a, b) =>
+          a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
+    );
     return groups;
   }
 
@@ -74,6 +84,7 @@ class AddonRegistryService {
         providerName: addon.providerName,
         originalId: addon.originalId.toString(),
         version: addon.version,
+        thumbnailUrl: addon.thumbnailUrl,
         installedFolders: folders,
         isManaged: true,
       ),
@@ -92,27 +103,43 @@ class AddonRegistryService {
     await _writeRegistry(client, registryEntries);
   }
 
-  List<InstalledAddonGroup> _buildManualGroups(List<InstalledAddonFolder> folders) {
+  List<InstalledAddonGroup> _buildManualGroups(
+    List<InstalledAddonFolder> folders,
+  ) {
     final groups = <InstalledAddonGroup>[];
 
     if (folders.isEmpty) {
       return groups;
     }
 
-    final byFolderName = {for (final folder in folders) folder.folderName: folder};
+    final byFolderName = {
+      for (final folder in folders) folder.folderName: folder,
+    };
     final aliasIndex = _buildAliasIndex(folders);
     final parentByChild = <String, String>{};
 
     for (final folder in folders) {
-      final parent = _resolveExplicitParent(folder, byFolderName, aliasIndex, parentByChild);
+      final parent = _resolveExplicitParent(
+        folder,
+        byFolderName,
+        aliasIndex,
+        parentByChild,
+      );
       if (parent != null) {
         parentByChild[folder.folderName] = parent.folderName;
       }
     }
 
-    final groupedFolderNames = parentByChild.keys.toSet()..addAll(parentByChild.values);
-    final orphanFolders = folders.where((folder) => !groupedFolderNames.contains(folder.folderName)).toList();
-    final syntheticGroups = _buildFallbackSyntheticGroups(orphanFolders, byFolderName, parentByChild);
+    final groupedFolderNames = parentByChild.keys.toSet()
+      ..addAll(parentByChild.values);
+    final orphanFolders = folders
+        .where((folder) => !groupedFolderNames.contains(folder.folderName))
+        .toList();
+    final syntheticGroups = _buildFallbackSyntheticGroups(
+      orphanFolders,
+      byFolderName,
+      parentByChild,
+    );
 
     final groupedByRoot = <String, List<InstalledAddonFolder>>{};
     for (final folder in folders) {
@@ -131,12 +158,17 @@ class AddonRegistryService {
       }
 
       final foldersInGroup = entry.value.toList()
-        ..sort((a, b) => a.folderName.toLowerCase().compareTo(b.folderName.toLowerCase()));
+        ..sort(
+          (a, b) =>
+              a.folderName.toLowerCase().compareTo(b.folderName.toLowerCase()),
+        );
       groups.add(
         InstalledAddonGroup(
           id: 'manual:${root.folderName.toLowerCase()}',
           displayName: root.title,
-          installedFolders: foldersInGroup.map((folder) => folder.folderName).toList(),
+          installedFolders: foldersInGroup
+              .map((folder) => folder.folderName)
+              .toList(),
           isManaged: false,
           folderDetails: foldersInGroup,
         ),
@@ -145,12 +177,17 @@ class AddonRegistryService {
 
     for (final syntheticGroup in syntheticGroups) {
       final sortedFolders = syntheticGroup.folders.toList()
-        ..sort((a, b) => a.folderName.toLowerCase().compareTo(b.folderName.toLowerCase()));
+        ..sort(
+          (a, b) =>
+              a.folderName.toLowerCase().compareTo(b.folderName.toLowerCase()),
+        );
       groups.add(
         InstalledAddonGroup(
           id: 'manual:${syntheticGroup.id}',
           displayName: syntheticGroup.displayName,
-          installedFolders: sortedFolders.map((folder) => folder.folderName).toList(),
+          installedFolders: sortedFolders
+              .map((folder) => folder.folderName)
+              .toList(),
           isManaged: false,
           folderDetails: sortedFolders,
         ),
@@ -160,7 +197,9 @@ class AddonRegistryService {
     return groups;
   }
 
-  Map<String, InstalledAddonFolder> _buildAliasIndex(List<InstalledAddonFolder> folders) {
+  Map<String, InstalledAddonFolder> _buildAliasIndex(
+    List<InstalledAddonFolder> folders,
+  ) {
     final aliases = <String, InstalledAddonFolder>{};
 
     for (final folder in folders) {
@@ -186,7 +225,11 @@ class AddonRegistryService {
   ) {
     final xPartTarget = folder.xPartOf?.trim();
     if (xPartTarget != null && xPartTarget.isNotEmpty) {
-      final parent = _findFolderReference(xPartTarget, byFolderName, aliasIndex);
+      final parent = _findFolderReference(
+        xPartTarget,
+        byFolderName,
+        aliasIndex,
+      );
       if (_isValidParent(folder, parent, parentByChild)) {
         return parent;
       }
@@ -232,7 +275,11 @@ class AddonRegistryService {
     return !_createsCycle(child.folderName, parent.folderName, parentByChild);
   }
 
-  bool _createsCycle(String childFolder, String parentFolder, Map<String, String> parentByChild) {
+  bool _createsCycle(
+    String childFolder,
+    String parentFolder,
+    Map<String, String> parentByChild,
+  ) {
     var cursor = parentFolder;
     while (parentByChild.containsKey(cursor)) {
       cursor = parentByChild[cursor]!;
@@ -270,7 +317,8 @@ class AddonRegistryService {
       final root = byFolderName[entry.key];
       if (root != null) {
         for (final member in members) {
-          if (member.folderName == root.folderName || assignedFolders.contains(member.folderName)) {
+          if (member.folderName == root.folderName ||
+              assignedFolders.contains(member.folderName)) {
             continue;
           }
           parentByChild[member.folderName] = root.folderName;
@@ -280,16 +328,23 @@ class AddonRegistryService {
         continue;
       }
 
-      final unassignedMembers = members.where((member) => !assignedFolders.contains(member.folderName)).toList();
+      final unassignedMembers = members
+          .where((member) => !assignedFolders.contains(member.folderName))
+          .toList();
       if (unassignedMembers.length >= 2) {
         groups.add(
           _SyntheticManualGroup(
             id: 'prefix:${entry.key.toLowerCase()}',
-            displayName: _prettifyManualDisplayName(entry.key, unassignedMembers.first.title),
+            displayName: _prettifyManualDisplayName(
+              entry.key,
+              unassignedMembers.first.title,
+            ),
             folders: unassignedMembers,
           ),
         );
-        assignedFolders.addAll(unassignedMembers.map((member) => member.folderName));
+        assignedFolders.addAll(
+          unassignedMembers.map((member) => member.folderName),
+        );
       }
     }
 
@@ -309,20 +364,25 @@ class AddonRegistryService {
     }
 
     for (final entry in titleBuckets.entries) {
-      final members = entry.value.where((folder) => !assignedFolders.contains(folder.folderName)).toList();
+      final members = entry.value
+          .where((folder) => !assignedFolders.contains(folder.folderName))
+          .toList();
       if (members.length < 2) {
         continue;
       }
 
       final root = members.firstWhere(
-        (folder) => _normalizeKey(folder.title) == entry.key || _normalizeKey(folder.folderName) == entry.key,
+        (folder) =>
+            _normalizeKey(folder.title) == entry.key ||
+            _normalizeKey(folder.folderName) == entry.key,
         orElse: () => members.first,
       );
 
       final normalizedRootFolder = _normalizeKey(root.folderName);
       final normalizedRootTitle = _normalizeKey(root.title);
 
-      final hasDedicatedRoot = normalizedRootFolder == entry.key || normalizedRootTitle == entry.key;
+      final hasDedicatedRoot =
+          normalizedRootFolder == entry.key || normalizedRootTitle == entry.key;
       if (hasDedicatedRoot) {
         for (final member in members) {
           if (member.folderName == root.folderName) {
@@ -347,7 +407,10 @@ class AddonRegistryService {
     return groups;
   }
 
-  bool _belongsToSyntheticGroup(String folderName, List<_SyntheticManualGroup> groups) {
+  bool _belongsToSyntheticGroup(
+    String folderName,
+    List<_SyntheticManualGroup> groups,
+  ) {
     for (final group in groups) {
       if (group.folders.any((folder) => folder.folderName == folderName)) {
         return true;
@@ -356,7 +419,10 @@ class AddonRegistryService {
     return false;
   }
 
-  String _findRootFolderName(String folderName, Map<String, String> parentByChild) {
+  String _findRootFolderName(
+    String folderName,
+    Map<String, String> parentByChild,
+  ) {
     var cursor = folderName;
     while (parentByChild.containsKey(cursor)) {
       cursor = parentByChild[cursor]!;
@@ -376,13 +442,21 @@ class AddonRegistryService {
 
   String _extractTitleGroupBase(String title) {
     final withoutBrackets = title.replaceAll(RegExp(r'\[[^\]]+\]'), '').trim();
-    final withoutParentheses = withoutBrackets.replaceAll(RegExp(r'\([^\)]+\)'), '').trim();
-    final splitByDash = withoutParentheses.split(RegExp(r'\s*[-:]\s*')).first.trim();
+    final withoutParentheses = withoutBrackets
+        .replaceAll(RegExp(r'\([^\)]+\)'), '')
+        .trim();
+    final splitByDash = withoutParentheses
+        .split(RegExp(r'\s*[-:]\s*'))
+        .first
+        .trim();
     return splitByDash.isEmpty ? title.trim() : splitByDash;
   }
 
   String _prettifyManualDisplayName(String key, String fallbackDisplayName) {
-    final cleanedFallback = fallbackDisplayName.split(RegExp(r'\s*[-:]\s*')).first.trim();
+    final cleanedFallback = fallbackDisplayName
+        .split(RegExp(r'\s*[-:]\s*'))
+        .first
+        .trim();
     if (cleanedFallback.isNotEmpty) {
       return cleanedFallback;
     }
@@ -404,18 +478,18 @@ class AddonRegistryService {
 
   String _buildManagedId(AddonItem addon) {
     final provider = addon.providerName.toLowerCase();
-    final originalId =
-        addon.originalId
-            .toString()
-            .toLowerCase()
-            .replaceAll(RegExp(r'[^a-z0-9._/-]+'), '-');
+    final originalId = addon.originalId.toString().toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9._/-]+'),
+      '-',
+    );
     if (originalId.isNotEmpty) {
       return '$provider:$originalId';
     }
 
-    final normalizedName = addon.name
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '-');
+    final normalizedName = addon.name.toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9]+'),
+      '-',
+    );
     return '$provider:$normalizedName';
   }
 
@@ -438,7 +512,9 @@ class AddonRegistryService {
 
       return decoded
           .whereType<Map>()
-          .map((item) => item.map((key, value) => MapEntry(key.toString(), value)))
+          .map(
+            (item) => item.map((key, value) => MapEntry(key.toString(), value)),
+          )
           .map(InstalledAddonGroup.fromJson)
           .toList();
     } catch (_) {
@@ -446,10 +522,15 @@ class AddonRegistryService {
     }
   }
 
-  Future<void> _writeRegistry(GameClient client, List<InstalledAddonGroup> groups) async {
+  Future<void> _writeRegistry(
+    GameClient client,
+    List<InstalledAddonGroup> groups,
+  ) async {
     final file = _registryFile(client);
     await file.parent.create(recursive: true);
-    final json = const JsonEncoder.withIndent('  ').convert(groups.map((group) => group.toJson()).toList());
+    final json = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(groups.map((group) => group.toJson()).toList());
     await file.writeAsString(json);
   }
 

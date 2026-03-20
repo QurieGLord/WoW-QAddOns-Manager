@@ -101,7 +101,7 @@ abstract class AppLocalizations {
   /// No description provided for @appTitle.
   ///
   /// In en, this message translates to:
-  /// **'WoW QAddOns Manager'**
+  /// **'Qddons Manager'**
   String get appTitle;
 
   /// No description provided for @homeTitle.
@@ -116,6 +116,42 @@ abstract class AppLocalizations {
   /// **'Settings'**
   String get settingsTitle;
 
+  /// No description provided for @settingsAppearanceTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Appearance'**
+  String get settingsAppearanceTitle;
+
+  /// No description provided for @settingsAppearanceSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Theme mode, accent palette and a live preview surface.'**
+  String get settingsAppearanceSubtitle;
+
+  /// No description provided for @settingsApplicationTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Application'**
+  String get settingsApplicationTitle;
+
+  /// No description provided for @settingsApplicationSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Only the essentials that matter right now.'**
+  String get settingsApplicationSubtitle;
+
+  /// No description provided for @settingsAboutTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'About'**
+  String get settingsAboutTitle;
+
+  /// No description provided for @settingsAboutSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Brand, version and project links.'**
+  String get settingsAboutSubtitle;
+
   /// No description provided for @themeLight.
   ///
   /// In en, this message translates to:
@@ -128,11 +164,233 @@ abstract class AppLocalizations {
   /// **'Dark Theme'**
   String get themeDark;
 
+  /// No description provided for @themeSystem.
+  ///
+  /// In en, this message translates to:
+  /// **'System'**
+  String get themeSystem;
+
   /// No description provided for @language.
   ///
   /// In en, this message translates to:
   /// **'Language'**
   String get language;
+
+  /// No description provided for @settingsThemeModeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Theme mode'**
+  String get settingsThemeModeTitle;
+
+  /// No description provided for @settingsThemeModeSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose how Qddons Manager reacts to light and dark surfaces.'**
+  String get settingsThemeModeSubtitle;
+
+  /// No description provided for @settingsAccentTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Accent palette'**
+  String get settingsAccentTitle;
+
+  /// No description provided for @settingsAccentSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick the seed color that drives the whole expressive system.'**
+  String get settingsAccentSubtitle;
+
+  /// No description provided for @settingsAccentCoral.
+  ///
+  /// In en, this message translates to:
+  /// **'Coral'**
+  String get settingsAccentCoral;
+
+  /// No description provided for @settingsAccentLagoon.
+  ///
+  /// In en, this message translates to:
+  /// **'Lagoon'**
+  String get settingsAccentLagoon;
+
+  /// No description provided for @settingsAccentGrove.
+  ///
+  /// In en, this message translates to:
+  /// **'Grove'**
+  String get settingsAccentGrove;
+
+  /// No description provided for @settingsAccentEmber.
+  ///
+  /// In en, this message translates to:
+  /// **'Ember'**
+  String get settingsAccentEmber;
+
+  /// No description provided for @settingsAccentOrchid.
+  ///
+  /// In en, this message translates to:
+  /// **'Orchid'**
+  String get settingsAccentOrchid;
+
+  /// No description provided for @settingsAccentTide.
+  ///
+  /// In en, this message translates to:
+  /// **'Tide'**
+  String get settingsAccentTide;
+
+  /// No description provided for @settingsPreviewTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Live preview'**
+  String get settingsPreviewTitle;
+
+  /// No description provided for @settingsPreviewSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'A compact preview of how the dashboard will feel.'**
+  String get settingsPreviewSubtitle;
+
+  /// No description provided for @settingsPreviewWindowTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Dashboard preview'**
+  String get settingsPreviewWindowTitle;
+
+  /// No description provided for @settingsPreviewClientName.
+  ///
+  /// In en, this message translates to:
+  /// **'Battle for Azeroth (8.3.7)'**
+  String get settingsPreviewClientName;
+
+  /// No description provided for @settingsLanguageTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'App language'**
+  String get settingsLanguageTitle;
+
+  /// No description provided for @settingsLanguageSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'This changes the application language immediately.'**
+  String get settingsLanguageSubtitle;
+
+  /// No description provided for @settingsLanguageEnglish.
+  ///
+  /// In en, this message translates to:
+  /// **'English'**
+  String get settingsLanguageEnglish;
+
+  /// No description provided for @settingsLanguageRussian.
+  ///
+  /// In en, this message translates to:
+  /// **'Russian'**
+  String get settingsLanguageRussian;
+
+  /// No description provided for @settingsPreviewChip.
+  ///
+  /// In en, this message translates to:
+  /// **'Addon sync'**
+  String get settingsPreviewChip;
+
+  /// No description provided for @settingsPreviewAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Open client'**
+  String get settingsPreviewAction;
+
+  /// No description provided for @aboutTagline.
+  ///
+  /// In en, this message translates to:
+  /// **'Universal addon management for every WoW era.'**
+  String get aboutTagline;
+
+  /// No description provided for @aboutVersionTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Version'**
+  String get aboutVersionTitle;
+
+  /// No description provided for @aboutDeveloperTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Developer'**
+  String get aboutDeveloperTitle;
+
+  /// No description provided for @aboutSupportTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Support the project'**
+  String get aboutSupportTitle;
+
+  /// No description provided for @aboutSupportSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Follow development, report issues or buy me a coffee.'**
+  String get aboutSupportSubtitle;
+
+  /// No description provided for @aboutOpenGitHub.
+  ///
+  /// In en, this message translates to:
+  /// **'Open GitHub'**
+  String get aboutOpenGitHub;
+
+  /// No description provided for @aboutOpenBoosty.
+  ///
+  /// In en, this message translates to:
+  /// **'Support on Boosty'**
+  String get aboutOpenBoosty;
+
+  /// No description provided for @externalLinkErrorMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t open the external link.'**
+  String get externalLinkErrorMessage;
+
+  /// No description provided for @dashboardManageAddons.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage addons'**
+  String get dashboardManageAddons;
+
+  /// No description provided for @dashboardRenameClient.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename client'**
+  String get dashboardRenameClient;
+
+  /// No description provided for @dashboardClientLocation.
+  ///
+  /// In en, this message translates to:
+  /// **'Location'**
+  String get dashboardClientLocation;
+
+  /// No description provided for @dashboardClientTypeRetail.
+  ///
+  /// In en, this message translates to:
+  /// **'Retail'**
+  String get dashboardClientTypeRetail;
+
+  /// No description provided for @dashboardClientTypeClassic.
+  ///
+  /// In en, this message translates to:
+  /// **'Classic'**
+  String get dashboardClientTypeClassic;
+
+  /// No description provided for @dashboardClientTypePtr.
+  ///
+  /// In en, this message translates to:
+  /// **'PTR'**
+  String get dashboardClientTypePtr;
+
+  /// No description provided for @dashboardClientTypeLegacy.
+  ///
+  /// In en, this message translates to:
+  /// **'Legacy'**
+  String get dashboardClientTypeLegacy;
+
+  /// No description provided for @dashboardClientTypeUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown'**
+  String get dashboardClientTypeUnknown;
 
   /// No description provided for @scanTitle.
   ///

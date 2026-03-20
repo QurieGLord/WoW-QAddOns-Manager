@@ -9,7 +9,7 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
-  String get appTitle => 'WoW QAddOns Manager';
+  String get appTitle => 'Qddons Manager';
 
   @override
   String get homeTitle => 'Dashboard';
@@ -18,13 +18,149 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsTitle => 'Settings';
 
   @override
+  String get settingsAppearanceTitle => 'Appearance';
+
+  @override
+  String get settingsAppearanceSubtitle =>
+      'Theme mode, accent palette and a live preview surface.';
+
+  @override
+  String get settingsApplicationTitle => 'Application';
+
+  @override
+  String get settingsApplicationSubtitle =>
+      'Only the essentials that matter right now.';
+
+  @override
+  String get settingsAboutTitle => 'About';
+
+  @override
+  String get settingsAboutSubtitle => 'Brand, version and project links.';
+
+  @override
   String get themeLight => 'Light Theme';
 
   @override
   String get themeDark => 'Dark Theme';
 
   @override
+  String get themeSystem => 'System';
+
+  @override
   String get language => 'Language';
+
+  @override
+  String get settingsThemeModeTitle => 'Theme mode';
+
+  @override
+  String get settingsThemeModeSubtitle =>
+      'Choose how Qddons Manager reacts to light and dark surfaces.';
+
+  @override
+  String get settingsAccentTitle => 'Accent palette';
+
+  @override
+  String get settingsAccentSubtitle =>
+      'Pick the seed color that drives the whole expressive system.';
+
+  @override
+  String get settingsAccentCoral => 'Coral';
+
+  @override
+  String get settingsAccentLagoon => 'Lagoon';
+
+  @override
+  String get settingsAccentGrove => 'Grove';
+
+  @override
+  String get settingsAccentEmber => 'Ember';
+
+  @override
+  String get settingsAccentOrchid => 'Orchid';
+
+  @override
+  String get settingsAccentTide => 'Tide';
+
+  @override
+  String get settingsPreviewTitle => 'Live preview';
+
+  @override
+  String get settingsPreviewSubtitle =>
+      'A compact preview of how the dashboard will feel.';
+
+  @override
+  String get settingsPreviewWindowTitle => 'Dashboard preview';
+
+  @override
+  String get settingsPreviewClientName => 'Battle for Azeroth (8.3.7)';
+
+  @override
+  String get settingsLanguageTitle => 'App language';
+
+  @override
+  String get settingsLanguageSubtitle =>
+      'This changes the application language immediately.';
+
+  @override
+  String get settingsLanguageEnglish => 'English';
+
+  @override
+  String get settingsLanguageRussian => 'Russian';
+
+  @override
+  String get settingsPreviewChip => 'Addon sync';
+
+  @override
+  String get settingsPreviewAction => 'Open client';
+
+  @override
+  String get aboutTagline => 'Universal addon management for every WoW era.';
+
+  @override
+  String get aboutVersionTitle => 'Version';
+
+  @override
+  String get aboutDeveloperTitle => 'Developer';
+
+  @override
+  String get aboutSupportTitle => 'Support the project';
+
+  @override
+  String get aboutSupportSubtitle =>
+      'Follow development, report issues or buy me a coffee.';
+
+  @override
+  String get aboutOpenGitHub => 'Open GitHub';
+
+  @override
+  String get aboutOpenBoosty => 'Support on Boosty';
+
+  @override
+  String get externalLinkErrorMessage => 'Couldn\'t open the external link.';
+
+  @override
+  String get dashboardManageAddons => 'Manage addons';
+
+  @override
+  String get dashboardRenameClient => 'Rename client';
+
+  @override
+  String get dashboardClientLocation => 'Location';
+
+  @override
+  String get dashboardClientTypeRetail => 'Retail';
+
+  @override
+  String get dashboardClientTypeClassic => 'Classic';
+
+  @override
+  String get dashboardClientTypePtr => 'PTR';
+
+  @override
+  String get dashboardClientTypeLegacy => 'Legacy';
+
+  @override
+  String get dashboardClientTypeUnknown => 'Unknown';
 
   @override
   String get scanTitle => 'Scan for Game Clients';

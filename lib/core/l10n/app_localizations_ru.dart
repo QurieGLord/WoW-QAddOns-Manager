@@ -9,7 +9,7 @@ class AppLocalizationsRu extends AppLocalizations {
   AppLocalizationsRu([String locale = 'ru']) : super(locale);
 
   @override
-  String get appTitle => 'WoW QAddOns Менеджер';
+  String get appTitle => 'Qddons Manager';
 
   @override
   String get homeTitle => 'Панель управления';
@@ -18,13 +18,150 @@ class AppLocalizationsRu extends AppLocalizations {
   String get settingsTitle => 'Настройки';
 
   @override
+  String get settingsAppearanceTitle => 'Внешний вид';
+
+  @override
+  String get settingsAppearanceSubtitle =>
+      'Режим темы, акцентная палитра и живой предпросмотр интерфейса.';
+
+  @override
+  String get settingsApplicationTitle => 'Приложение';
+
+  @override
+  String get settingsApplicationSubtitle =>
+      'Только действительно полезные базовые параметры.';
+
+  @override
+  String get settingsAboutTitle => 'О приложении';
+
+  @override
+  String get settingsAboutSubtitle => 'Бренд, версия и ссылки на проект.';
+
+  @override
   String get themeLight => 'Светлая тема';
 
   @override
   String get themeDark => 'Темная тема';
 
   @override
+  String get themeSystem => 'Системная';
+
+  @override
   String get language => 'Язык';
+
+  @override
+  String get settingsThemeModeTitle => 'Режим темы';
+
+  @override
+  String get settingsThemeModeSubtitle =>
+      'Выберите, как Qddons Manager должен выглядеть на светлых и тёмных поверхностях.';
+
+  @override
+  String get settingsAccentTitle => 'Акцентная палитра';
+
+  @override
+  String get settingsAccentSubtitle =>
+      'Выберите базовый цвет, который задаёт весь выразительный стиль интерфейса.';
+
+  @override
+  String get settingsAccentCoral => 'Коралл';
+
+  @override
+  String get settingsAccentLagoon => 'Лагуна';
+
+  @override
+  String get settingsAccentGrove => 'Роща';
+
+  @override
+  String get settingsAccentEmber => 'Уголь';
+
+  @override
+  String get settingsAccentOrchid => 'Орхидея';
+
+  @override
+  String get settingsAccentTide => 'Прилив';
+
+  @override
+  String get settingsPreviewTitle => 'Живой предпросмотр';
+
+  @override
+  String get settingsPreviewSubtitle =>
+      'Небольшой превью-фрагмент, показывающий настроение дэшборда.';
+
+  @override
+  String get settingsPreviewWindowTitle => 'Предпросмотр дэшборда';
+
+  @override
+  String get settingsPreviewClientName => 'Battle for Azeroth (8.3.7)';
+
+  @override
+  String get settingsLanguageTitle => 'Язык приложения';
+
+  @override
+  String get settingsLanguageSubtitle =>
+      'Язык интерфейса меняется сразу после выбора.';
+
+  @override
+  String get settingsLanguageEnglish => 'English';
+
+  @override
+  String get settingsLanguageRussian => 'Русский';
+
+  @override
+  String get settingsPreviewChip => 'Синхронизация аддонов';
+
+  @override
+  String get settingsPreviewAction => 'Открыть клиент';
+
+  @override
+  String get aboutTagline =>
+      'Универсальное управление аддонами для любой эпохи WoW.';
+
+  @override
+  String get aboutVersionTitle => 'Версия';
+
+  @override
+  String get aboutDeveloperTitle => 'Разработчик';
+
+  @override
+  String get aboutSupportTitle => 'Поддержать проект';
+
+  @override
+  String get aboutSupportSubtitle =>
+      'Следите за разработкой, сообщайте о проблемах или угостите автора кофе.';
+
+  @override
+  String get aboutOpenGitHub => 'Открыть GitHub';
+
+  @override
+  String get aboutOpenBoosty => 'Поддержать на Boosty';
+
+  @override
+  String get externalLinkErrorMessage => 'Не удалось открыть внешнюю ссылку.';
+
+  @override
+  String get dashboardManageAddons => 'Управление аддонами';
+
+  @override
+  String get dashboardRenameClient => 'Переименовать клиент';
+
+  @override
+  String get dashboardClientLocation => 'Расположение';
+
+  @override
+  String get dashboardClientTypeRetail => 'Retail';
+
+  @override
+  String get dashboardClientTypeClassic => 'Classic';
+
+  @override
+  String get dashboardClientTypePtr => 'PTR';
+
+  @override
+  String get dashboardClientTypeLegacy => 'Legacy';
+
+  @override
+  String get dashboardClientTypeUnknown => 'Неизвестно';
 
   @override
   String get scanTitle => 'Поиск игровых клиентов';

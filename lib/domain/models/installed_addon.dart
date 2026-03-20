@@ -22,6 +22,7 @@ class InstalledAddonGroup {
   final String? providerName;
   final String? originalId;
   final String? version;
+  final String? thumbnailUrl;
   final List<String> installedFolders;
   final bool isManaged;
   final List<InstalledAddonFolder> folderDetails;
@@ -33,19 +34,21 @@ class InstalledAddonGroup {
     this.providerName,
     this.originalId,
     this.version,
+    this.thumbnailUrl,
     this.isManaged = false,
     this.folderDetails = const <InstalledAddonFolder>[],
   });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'displayName': displayName,
-        'providerName': providerName,
-        'originalId': originalId,
-        'version': version,
-        'installedFolders': installedFolders,
-        'isManaged': isManaged,
-      };
+    'id': id,
+    'displayName': displayName,
+    'providerName': providerName,
+    'originalId': originalId,
+    'version': version,
+    'thumbnailUrl': thumbnailUrl,
+    'installedFolders': installedFolders,
+    'isManaged': isManaged,
+  };
 
   factory InstalledAddonGroup.fromJson(Map<String, dynamic> json) {
     return InstalledAddonGroup(
@@ -54,9 +57,11 @@ class InstalledAddonGroup {
       providerName: json['providerName'] as String?,
       originalId: json['originalId']?.toString(),
       version: json['version'] as String?,
-      installedFolders: ((json['installedFolders'] as List<dynamic>? ?? const <dynamic>[])
-              .whereType<String>())
-          .toList(),
+      thumbnailUrl: json['thumbnailUrl'] as String?,
+      installedFolders:
+          ((json['installedFolders'] as List<dynamic>? ?? const <dynamic>[])
+                  .whereType<String>())
+              .toList(),
       isManaged: json['isManaged'] as bool? ?? false,
     );
   }
@@ -67,6 +72,7 @@ class InstalledAddonGroup {
     String? providerName,
     String? originalId,
     String? version,
+    String? thumbnailUrl,
     List<String>? installedFolders,
     bool? isManaged,
     List<InstalledAddonFolder>? folderDetails,
@@ -77,6 +83,7 @@ class InstalledAddonGroup {
       providerName: providerName ?? this.providerName,
       originalId: originalId ?? this.originalId,
       version: version ?? this.version,
+      thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
       installedFolders: installedFolders ?? this.installedFolders,
       isManaged: isManaged ?? this.isManaged,
       folderDetails: folderDetails ?? this.folderDetails,
