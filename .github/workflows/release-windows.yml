@@ -40,7 +40,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: recursive
+          submodules: false
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -51,14 +51,17 @@ jobs:
       - name: Prepare environment file
         shell: pwsh
         run: |
+          $docsDir = Join-Path $PWD ".docs"
+          if (-not (Test-Path $docsDir)) {
+            New-Item -ItemType Directory -Path $docsDir -Force | Out-Null
+          }
+
           $key = "${{ secrets.CURSEFORGE_API_KEY }}"
           if ([string]::IsNullOrWhiteSpace($key)) {
-            $key = ""
+            throw "GitHub secret CURSEFORGE_API_KEY is missing or empty"
           }
-          if (-not (Test-Path .docs)) {
-            throw ".docs submodule is missing"
-          }
-          "CURSEFORGE_API_KEY=$key" | Set-Content -Path .docs/.env -Encoding utf8
+
+          "CURSEFORGE_API_KEY=$key" | Set-Content -Path (Join-Path $docsDir ".env") -Encoding utf8
 
       - name: Install dependencies
         run: flutter pub get
