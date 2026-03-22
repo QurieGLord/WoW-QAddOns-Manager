@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
 import 'package:wow_qaddons_manager/core/services/cache_service.dart';
 import 'package:wow_qaddons_manager/core/services/file_system_service.dart';
 import 'package:wow_qaddons_manager/data/services/addon_installer_service.dart';
@@ -115,5 +118,117 @@ class LocalFileSystemService implements FileSystemService {
   @override
   Future<void> deleteAddonGroup(GameClient client, InstalledAddonGroup group) {
     return _installerService.deleteAddon(client, group);
+  }
+
+  @override
+  Future<void> launchGameClient(GameClient client) async {
+    final executableName = client.executableName?.trim();
+    if (executableName == null || executableName.isEmpty) {
+      throw const LaunchGameException(LaunchGameFailure.missingExecutableName);
+    }
+
+    final clientDirectory = Directory(client.path);
+    if (!await clientDirectory.exists()) {
+      throw const LaunchGameException(LaunchGameFailure.invalidClientPath);
+    }
+
+    final executablePath = p.normalize(p.join(client.path, executableName));
+    final executableFile = File(executablePath);
+    if (!await executableFile.exists()) {
+      throw LaunchGameException(
+        LaunchGameFailure.executableNotFound,
+        details: executablePath,
+      );
+    }
+
+    try {
+      if (Platform.isWindows) {
+        await _launchWindowsClient(executablePath, client.path);
+        return;
+      }
+
+      await Process.start(
+        executablePath,
+        const <String>[],
+        workingDirectory: client.path,
+        mode: ProcessStartMode.detached,
+      );
+    } on ProcessException catch (error) {
+      throw LaunchGameException(
+        LaunchGameFailure.launchFailed,
+        details: error.message,
+      );
+    }
+  }
+
+  Future<void> _launchWindowsClient(
+    String executablePath,
+    String workingDirectory,
+  ) async {
+    String? lastError;
+
+    for (final launcher in <Future<void> Function()>[
+      () => _launchWindowsViaPowerShell(
+        executablePath,
+        workingDirectory,
+        runAsAdmin: false,
+      ),
+      () => _launchWindowsViaPowerShell(
+        executablePath,
+        workingDirectory,
+        runAsAdmin: true,
+      ),
+    ]) {
+      try {
+        await launcher();
+        return;
+      } on LaunchGameException catch (error) {
+        lastError = error.details ?? error.toString();
+      } on ProcessException catch (error) {
+        lastError = error.message;
+      }
+    }
+
+    throw LaunchGameException(
+      LaunchGameFailure.launchFailed,
+      details: lastError,
+    );
+  }
+
+  Future<void> _launchWindowsViaPowerShell(
+    String executablePath,
+    String workingDirectory, {
+    required bool runAsAdmin,
+  }) async {
+    final escapedExecutablePath = executablePath.replaceAll("'", "''");
+    final escapedWorkingDirectory = workingDirectory.replaceAll("'", "''");
+    final command = StringBuffer()
+      ..write("\$ErrorActionPreference = 'Stop'; Start-Process ")
+      ..write("-FilePath '$escapedExecutablePath' ")
+      ..write("-WorkingDirectory '$escapedWorkingDirectory'");
+
+    if (runAsAdmin) {
+      command.write(' -Verb RunAs');
+    }
+
+    final result = await Process.run(
+      'powershell.exe',
+      <String>[
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        command.toString(),
+      ],
+      runInShell: true,
+      workingDirectory: workingDirectory,
+    );
+
+    if (result.exitCode != 0) {
+      throw LaunchGameException(
+        LaunchGameFailure.launchFailed,
+        details: '${result.stderr}'.trim(),
+      );
+    }
   }
 }

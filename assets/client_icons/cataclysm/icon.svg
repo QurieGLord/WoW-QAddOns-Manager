@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="cata-gold" x1="256" y1="138" x2="256" y2="392" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFE9C5"/>
+      <stop offset=".6" stop-color="#D9A56A"/>
+      <stop offset="1" stop-color="#9B6734"/>
+    </linearGradient>
+    <linearGradient id="cata-magma" x1="218" y1="168" x2="286" y2="356" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFB15A"/>
+      <stop offset=".48" stop-color="#E97226"/>
+      <stop offset="1" stop-color="#A82820"/>
+    </linearGradient>
+    <linearGradient id="cata-ember" x1="184" y1="206" x2="238" y2="332" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFCE8F"/>
+      <stop offset=".6" stop-color="#F7772E"/>
+      <stop offset="1" stop-color="#B83A21"/>
+    </linearGradient>
+    <linearGradient id="cata-obsidian" x1="256" y1="168" x2="256" y2="356" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#322621"/>
+      <stop offset=".54" stop-color="#181315"/>
+      <stop offset="1" stop-color="#080709"/>
+    </linearGradient>
+  </defs>
+  <rect x="84" y="84" width="344" height="344" rx="92" stroke="#E8D6B2" stroke-width="18"/>
+  <path d="M214 160C181 176 157 204 146 242C136 279 143 316 164 348C178 368 196 384 220 394L236 360C218 351 205 339 196 321C185 300 184 274 191 248C197 223 211 202 234 186L214 160Z" fill="url(#cata-gold)"/>
+  <path d="M224 186C205 196 192 214 186 239C180 264 183 288 194 309C201 322 210 334 224 344L236 324C226 317 219 307 214 294C208 277 209 259 214 241C219 224 228 209 242 198L224 186Z" fill="url(#cata-ember)"/>
+  <path d="M298 160C331 176 355 204 366 242C376 279 369 316 348 348C334 368 316 384 292 394L276 360C294 351 307 339 316 321C327 300 328 274 321 248C315 223 301 202 278 186L298 160Z" fill="url(#cata-gold)"/>
+  <path d="M288 186C307 196 320 214 326 239C332 264 329 288 318 309C311 322 302 334 288 344L276 324C286 317 293 307 298 294C304 277 303 259 298 241C293 224 284 209 270 198L288 186Z" fill="url(#cata-ember)"/>
+  <path d="M204 178L222 150L242 164L256 126L270 164L290 150L308 178L288 200C279 192 268 188 256 188C244 188 233 192 224 200L204 178Z" fill="url(#cata-obsidian)"/>
+  <path d="M214 170L226 148L238 166L226 180L214 170Z" fill="#FF9E58"/>
+  <path d="M248 148L256 132L264 148L256 160L248 148Z" fill="#FF9E58"/>
+  <path d="M274 170L286 148L298 166L286 180L274 170Z" fill="#FF9E58"/>
+  <path d="M232 198C239 188 247 182 256 182C265 182 273 188 280 198C288 209 292 223 291 240C287 277 275 314 256 350C237 314 225 277 221 240C220 223 224 209 232 198Z" fill="url(#cata-obsidian)"/>
+  <path d="M250 174L242 202L250 230L242 260L256 336L270 260L262 230L270 202L262 174L256 158L250 174Z" fill="url(#cata-magma)"/>
+  <path d="M220 210C231 200 243 194 256 194C269 194 281 200 292 210" stroke="#D3A05D" stroke-width="8" stroke-linecap="round"/>
+  <path d="M196 206C179 229 172 252 172 276C172 298 181 319 200 338" stroke="#FFB477" stroke-width="8" stroke-linecap="round" opacity=".72"/>
+  <path d="M316 206C333 229 340 252 340 276C340 298 331 319 312 338" stroke="#FFB477" stroke-width="8" stroke-linecap="round" opacity=".72"/>
+  <path d="M226 320C236 334 246 349 256 370C266 349 276 334 286 320L298 346C287 366 273 382 256 394C239 382 225 366 214 346L226 320Z" fill="url(#cata-gold)"/>
+  <path d="M238 328C245 338 251 350 256 362C261 350 267 338 274 328L280 346C272 359 264 371 256 382C248 371 240 359 232 346L238 328Z" fill="url(#cata-magma)"/>
+</svg>

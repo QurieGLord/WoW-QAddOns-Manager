@@ -52,6 +52,10 @@
   "scanTitle": "Scan for Game Clients",
   "noClientsFound": "No WoW clients found. Please select directory manually.",
   "clientDetailsTitle": "Client Details",
+  "clientLaunchAction": "Launch game",
+  "clientLaunchMissingExecutable": "The game executable couldn't be found for this client.",
+  "clientLaunchInvalidPath": "The client folder is unavailable or no longer exists.",
+  "clientLaunchFailed": "Couldn't launch the game client.",
   "clientDetailsLoadingAddons": "Loading installed addons...",
   "clientDetailsLoadErrorTitle": "Couldn't load installed addons",
   "clientDetailsLoadErrorMessage": "The installed addons list couldn't be loaded: {details}",
@@ -140,5 +144,8 @@
       "version": {}
     }
   },
-  "addonNoDescription": "No description available"
+  "addonNoDescription": "No description available",
+  "addonDetailsGalleryTitle": "Screenshots",
+  "addonDetailsDescriptionTitle": "Description",
+  "addonDetailsClose": "Close"
 }

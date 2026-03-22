@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="wrath-bone" x1="256" y1="102" x2="256" y2="396" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF6E6"/>
+      <stop offset=".62" stop-color="#F6F0E4"/>
+      <stop offset="1" stop-color="#D6BA82"/>
+    </linearGradient>
+    <linearGradient id="wrath-ice" x1="142" y1="168" x2="238" y2="396" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#DDF6FF"/>
+      <stop offset=".58" stop-color="#8FD2FF"/>
+      <stop offset="1" stop-color="#4B94CD"/>
+    </linearGradient>
+    <linearGradient id="wrath-shadow" x1="256" y1="178" x2="256" y2="396" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#335277"/>
+      <stop offset=".54" stop-color="#243D5D"/>
+      <stop offset="1" stop-color="#132436"/>
+    </linearGradient>
+  </defs>
+  <rect x="84" y="84" width="344" height="344" rx="92" stroke="#E8D6B2" stroke-width="18"/>
+  <path d="M214 168C181 180 156 204 144 242C134 278 141 316 162 348C176 370 194 386 220 396L236 362C217 352 203 338 194 318C183 294 183 265 191 239C199 212 214 191 238 176L214 168Z" fill="url(#wrath-ice)"/>
+  <path d="M224 186C205 196 191 214 185 239C179 264 182 289 194 310C201 324 212 336 227 346L239 326C228 318 220 308 215 295C209 277 210 257 216 239C221 222 230 208 244 196L224 186Z" fill="#EAFBFF" opacity=".88"/>
+  <path d="M298 168C331 180 356 204 368 242C378 278 371 316 350 348C336 370 318 386 292 396L276 362C295 352 309 338 318 318C329 294 329 265 321 239C313 212 298 191 274 176L298 168Z" fill="url(#wrath-ice)"/>
+  <path d="M288 186C307 196 321 214 327 239C333 264 330 289 318 310C311 324 300 336 285 346L273 326C284 318 292 308 297 295C303 277 302 257 296 239C291 222 282 208 268 196L288 186Z" fill="#EAFBFF" opacity=".88"/>
+  <path d="M216 198C226 184 240 178 256 178C272 178 286 184 296 198C306 212 310 231 308 252C304 292 292 334 272 369C267 378 261 388 256 396C251 388 245 378 240 369C220 334 208 292 204 252C202 231 206 212 216 198Z" fill="url(#wrath-shadow)"/>
+  <path d="M176 184L198 164L220 118L240 156L256 102L272 156L292 118L314 164L336 184L319 214C301 198 282 190 256 190C230 190 211 198 193 214L176 184Z" fill="url(#wrath-bone)"/>
+  <path d="M208 158L222 132L238 158L224 176L208 158Z" fill="#92D9FF"/>
+  <path d="M248 130L256 112L264 130L256 144L248 130Z" fill="#92D9FF"/>
+  <path d="M274 158L290 132L304 158L288 176L274 158Z" fill="#92D9FF"/>
+  <path d="M204 214C223 196 241 188 256 188C271 188 289 196 308 214L286 238C275 230 265 226 256 226C247 226 237 230 226 238L204 214Z" fill="#F8F3E8"/>
+  <path d="M246 148L256 124L266 148L270 322C267 349 262 372 256 392C250 372 245 349 242 322L246 148Z" fill="#F6F0E4"/>
+  <path d="M248 154L256 138L264 154L266 316C264 339 260 359 256 374C252 359 248 339 246 316L248 154Z" fill="#6CB9F2"/>
+  <path d="M256 236L276 254L256 272L236 254L256 236Z" fill="#A8E4FF"/>
+  <path d="M222 322C234 334 245 350 256 372C267 350 278 334 290 322L298 346C287 366 273 383 256 396C239 383 225 366 214 346L222 322Z" fill="#D6BA82"/>
+  <path d="M236 330C244 340 251 353 256 366C261 353 268 340 276 330L282 346C274 361 265 374 256 384C247 374 238 361 230 346L236 330Z" fill="#8FD2FF"/>
+  <path d="M200 210C216 198 234 192 256 192C278 192 296 198 312 210" stroke="#D6BA82" stroke-width="8" stroke-linecap="round"/>
+  <path d="M190 206C174 232 170 286 208 334" stroke="#F1FBFF" stroke-width="8" stroke-linecap="round" opacity=".75"/>
+  <path d="M322 206C338 232 342 286 304 334" stroke="#F1FBFF" stroke-width="8" stroke-linecap="round" opacity=".75"/>
+</svg>

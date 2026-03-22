@@ -50,28 +50,36 @@ class CurseForgeProvider extends IAddonProvider {
                   gameVersion,
                 ),
                 queryScore: _scoreQueryMatch(mod, query),
+                strongQueryCandidate: _isStrongQueryCandidate(mod, query),
               ),
             )
             .where(
               (candidate) =>
+                  candidate.strongQueryCandidate ||
                   candidate.previewEvidenceScore > 0 ||
                   candidate.metadataScore > 0,
             )
             .where(
-              (candidate) => !_hasConflictingMetadata(
-                candidate.mod,
-                profile,
-                previewFile: candidate.previewFile,
-              ),
+              (candidate) =>
+                  !_hasConflictingMetadata(
+                    candidate.mod,
+                    profile,
+                    previewFile: candidate.previewFile,
+                  ) ||
+                  candidate.strongQueryCandidate,
             )
             .toList()
           ..sort(
             (a, b) =>
-                (b.previewEvidenceScore * 2 + b.metadataScore + b.queryScore)
+                (b.previewEvidenceScore * 2 +
+                        b.metadataScore +
+                        b.queryScore * 2 +
+                        (b.strongQueryCandidate ? 40 : 0))
                     .compareTo(
                       a.previewEvidenceScore * 2 +
                           a.metadataScore +
-                          a.queryScore,
+                          a.queryScore * 2 +
+                          (a.strongQueryCandidate ? 40 : 0),
                     ),
           );
 
@@ -233,10 +241,13 @@ class CurseForgeProvider extends IAddonProvider {
       summary: mod.summary,
       author: mod.primaryAuthor,
       thumbnailUrl: mod.logo?.thumbnailUrl,
+      screenshotUrls: mod.screenshotUrls,
       providerName: providerName,
       originalId: mod.id,
+      sourceSlug: mod.slug,
       identityHints: <String>[
         mod.name,
+        if (mod.slug.isNotEmpty) mod.slug,
         if (previewFile?.displayName != null) previewFile!.displayName!,
         if (previewFile != null) previewFile.fileName,
         if (previewFile != null) _deriveNameFromFileName(previewFile.fileName),
@@ -251,18 +262,79 @@ class CurseForgeProvider extends IAddonProvider {
       return 0;
     }
 
+    final queryTokens = _tokenizeForSearch(query);
     final name = mod.name.toLowerCase();
+    final slug = mod.slug.toLowerCase();
     final summary = mod.summary.toLowerCase();
     if (name == normalizedQuery) {
       return 120;
     }
+    if (slug == normalizedQuery) {
+      return 110;
+    }
     if (name.contains(normalizedQuery)) {
       return 80;
+    }
+    if (slug.contains(normalizedQuery)) {
+      return 78;
     }
     if (summary.contains(normalizedQuery)) {
       return 40;
     }
+    if (_containsAllSearchTokens(
+      '${mod.name} ${mod.slug} ${mod.summary}',
+      queryTokens,
+    )) {
+      return 70;
+    }
     return 10;
+  }
+
+  bool _isStrongQueryCandidate(CfMod mod, String query) {
+    final normalizedQuery = _normalizeForSearch(query);
+    if (normalizedQuery.isEmpty) {
+      return false;
+    }
+
+    final normalizedName = _normalizeForSearch(mod.name);
+    final normalizedSlug = _normalizeForSearch(mod.slug);
+    final normalizedSummary = _normalizeForSearch(mod.summary);
+    final queryTokens = _tokenizeForSearch(query);
+    return normalizedName == normalizedQuery ||
+        normalizedSlug == normalizedQuery ||
+        normalizedName.startsWith(normalizedQuery) ||
+        normalizedSlug.startsWith(normalizedQuery) ||
+        normalizedName.contains(normalizedQuery) ||
+        normalizedSlug.contains(normalizedQuery) ||
+        normalizedSummary.contains(normalizedQuery) ||
+        _containsAllSearchTokens(
+          '${mod.name} ${mod.slug} ${mod.summary}',
+          queryTokens,
+        );
+  }
+
+  String _normalizeForSearch(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '').trim();
+  }
+
+  List<String> _tokenizeForSearch(String value) {
+    return value
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9]+'))
+        .map((token) => token.trim())
+        .where((token) => token.length >= 2)
+        .toList(growable: false);
+  }
+
+  bool _containsAllSearchTokens(String haystack, List<String> tokens) {
+    if (tokens.isEmpty) {
+      return false;
+    }
+
+    final normalizedHaystack = _normalizeForSearch(haystack);
+    return tokens.every(
+      (token) => normalizedHaystack.contains(_normalizeForSearch(token)),
+    );
   }
 
   bool _hasConflictingMetadata(

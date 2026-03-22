@@ -54,6 +54,16 @@ class RenameClientUseCase {
   }
 }
 
+class LaunchGameUseCase {
+  final FileSystemService _fileSystemService;
+
+  const LaunchGameUseCase(this._fileSystemService);
+
+  Future<void> call(GameClient client) {
+    return _fileSystemService.launchGameClient(client);
+  }
+}
+
 final loadClientsUseCaseProvider = Provider<LoadClientsUseCase>((ref) {
   return LoadClientsUseCase(ref.read(clientRepositoryProvider));
 });
@@ -72,4 +82,8 @@ final scanWowClientsUseCaseProvider = Provider<ScanWowClientsUseCase>((ref) {
 
 final renameClientUseCaseProvider = Provider<RenameClientUseCase>((ref) {
   return RenameClientUseCase(ref.read(clientRepositoryProvider));
+});
+
+final launchGameUseCaseProvider = Provider<LaunchGameUseCase>((ref) {
+  return LaunchGameUseCase(ref.read(fileSystemServiceProvider));
 });

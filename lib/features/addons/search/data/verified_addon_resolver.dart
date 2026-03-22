@@ -6,6 +6,9 @@ import 'package:wow_qaddons_manager/features/addons/shared/application/services/
 
 class VerifiedAddonResolver {
   static const Duration verifiedPayloadTtl = Duration(hours: 6);
+  static const String _verifiedPayloadNamespace = 'verified_payloads_v2';
+  static const String _verifiedPayloadInflightNamespace =
+      'verified_payload_inflight_v2';
 
   final CurseForgeService _curseForgeService;
   final GitHubService _gitHubService;
@@ -47,7 +50,7 @@ class VerifiedAddonResolver {
     }
 
     return _cacheService.coalesce(
-      'verified_payload_inflight',
+      _verifiedPayloadInflightNamespace,
       cacheKey,
       () async {
         final stopwatch = Stopwatch()..start();
@@ -108,7 +111,7 @@ class VerifiedAddonResolver {
   ) async {
     if (requestContext.cachePolicy.readMemory) {
       final memoryItem = _cacheService.get<AddonItem>(
-        'verified_payloads',
+        _verifiedPayloadNamespace,
         cacheKey,
       );
       if (memoryItem != null) {
@@ -120,7 +123,10 @@ class VerifiedAddonResolver {
       return null;
     }
 
-    final json = await _cacheService.getJson('verified_payloads', cacheKey);
+    final json = await _cacheService.getJson(
+      _verifiedPayloadNamespace,
+      cacheKey,
+    );
     if (json == null) {
       return null;
     }
@@ -128,7 +134,7 @@ class VerifiedAddonResolver {
     final cachedItem = AddonItem.fromJson(json);
     if (requestContext.cachePolicy.writeMemory) {
       _cacheService.set<AddonItem>(
-        'verified_payloads',
+        _verifiedPayloadNamespace,
         cacheKey,
         cachedItem,
         ttl: verifiedPayloadTtl,
@@ -144,7 +150,7 @@ class VerifiedAddonResolver {
   ) async {
     if (requestContext.cachePolicy.writeMemory) {
       _cacheService.set<AddonItem>(
-        'verified_payloads',
+        _verifiedPayloadNamespace,
         cacheKey,
         item,
         ttl: verifiedPayloadTtl,
@@ -153,7 +159,7 @@ class VerifiedAddonResolver {
 
     if (requestContext.cachePolicy.writeDisk) {
       await _cacheService.setJson(
-        'verified_payloads',
+        _verifiedPayloadNamespace,
         cacheKey,
         item.toJson(),
         ttl: verifiedPayloadTtl,

@@ -234,6 +234,7 @@ class WowskillProvider extends IAddonProvider {
       name: detail.displayName.isEmpty ? item.name : detail.displayName,
       summary: detail.summary.isEmpty ? item.summary : detail.summary,
       thumbnailUrl: detail.thumbnailUrl ?? item.thumbnailUrl,
+      screenshotUrls: detail.galleryUrls,
       version: selectedDownload.versionLabel.isEmpty
           ? item.version
           : selectedDownload.versionLabel,
@@ -309,6 +310,7 @@ class WowskillProvider extends IAddonProvider {
         displayName: _normalizeAddonTitle(title, url: url),
         summary: _cleanupText(summary),
         thumbnailUrl: thumbnailUrl,
+        galleryUrls: _parseGalleryUrls(html, thumbnailUrl: thumbnailUrl),
         downloads: downloads,
       );
     } catch (error) {
@@ -987,6 +989,42 @@ class WowskillProvider extends IAddonProvider {
     return _cleanupText(_stripHtml(match.group(1) ?? ''));
   }
 
+  List<String> _parseGalleryUrls(String html, {String? thumbnailUrl}) {
+    final urls = <String>{
+      if (thumbnailUrl != null && thumbnailUrl.trim().isNotEmpty) thumbnailUrl,
+    };
+
+    final matches = RegExp(
+      r'(?:data-lazy-src|data-src|src)="([^"]+)"',
+      caseSensitive: false,
+    ).allMatches(html);
+
+    for (final match in matches) {
+      final normalizedUrl = _normalizeDownloadUrl(match.group(1));
+      if (normalizedUrl == null) {
+        continue;
+      }
+
+      final lowerUrl = normalizedUrl.toLowerCase();
+      if (!lowerUrl.contains('/wp-content/uploads/')) {
+        continue;
+      }
+      if (!(lowerUrl.endsWith('.jpg') ||
+          lowerUrl.endsWith('.jpeg') ||
+          lowerUrl.endsWith('.png') ||
+          lowerUrl.endsWith('.webp'))) {
+        continue;
+      }
+
+      urls.add(normalizedUrl);
+      if (urls.length >= 6) {
+        break;
+      }
+    }
+
+    return urls.toList(growable: false);
+  }
+
   String _extractVersionLabel(String value) {
     final matches = RegExp(
       r'\d+\.\d+(?:\.\d+)?[a-z]?',
@@ -1086,12 +1124,14 @@ class _WowskillDetailPage {
   final String displayName;
   final String summary;
   final String? thumbnailUrl;
+  final List<String> galleryUrls;
   final List<_WowskillDownloadEntry> downloads;
 
   const _WowskillDetailPage({
     required this.displayName,
     required this.summary,
     required this.thumbnailUrl,
+    required this.galleryUrls,
     required this.downloads,
   });
 }

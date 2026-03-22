@@ -174,6 +174,20 @@ class AppLocalizationsRu extends AppLocalizations {
   String get clientDetailsTitle => 'Сведения о клиенте';
 
   @override
+  String get clientLaunchAction => 'Запустить игру';
+
+  @override
+  String get clientLaunchMissingExecutable =>
+      'Для этого клиента не удалось найти исполняемый файл игры.';
+
+  @override
+  String get clientLaunchInvalidPath =>
+      'Папка клиента недоступна или больше не существует.';
+
+  @override
+  String get clientLaunchFailed => 'Не удалось запустить игровой клиент.';
+
+  @override
   String get clientDetailsLoadingAddons => 'Загрузка установленных аддонов...';
 
   @override
@@ -266,4 +280,13 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get addonNoDescription => 'Описание отсутствует';
+
+  @override
+  String get addonDetailsGalleryTitle => 'Скриншоты';
+
+  @override
+  String get addonDetailsDescriptionTitle => 'Описание';
+
+  @override
+  String get addonDetailsClose => 'Закрыть';
 }

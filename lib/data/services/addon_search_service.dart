@@ -58,4 +58,16 @@ class AddonSearchService {
       ),
     );
   }
+
+  Future<AddonItem?> verifyCandidate(AddonItem item, String gameVersion) {
+    return _verifiedResolver.verifyCandidate(
+      item,
+      gameVersion,
+      requestContext: ProviderRequestContext(
+        traceId: 'verify:${item.providerName}:${item.originalId}',
+        cachePolicy: CachePolicy.preferCache,
+        timeout: const Duration(seconds: 15),
+      ),
+    );
+  }
 }

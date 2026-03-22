@@ -1,13 +1,18 @@
 import 'dart:async';
+import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_improved_scrolling/flutter_improved_scrolling.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:wow_qaddons_manager/app/providers/service_providers.dart';
 import 'package:wow_qaddons_manager/core/l10n/app_localizations.dart';
+import 'package:wow_qaddons_manager/core/services/file_system_service.dart';
 import 'package:wow_qaddons_manager/core/theme/app_theme.dart';
 import 'package:wow_qaddons_manager/core/utils/wow_version_profile.dart';
 import 'package:wow_qaddons_manager/data/network/github_provider.dart';
@@ -35,26 +40,192 @@ final Uri kProjectGitHubUri = Uri.parse(
 );
 final Uri kProjectBoostyUri = Uri.parse('https://boosty.to/qurieglord');
 const String kClientCardAssetsRoot = 'assets/client_cards';
-Future<Set<String>>? _clientCardAssetManifestFuture;
+const String kClientIconAssetsRoot = 'assets/client_icons';
+const Alignment kClientBannerArtAlignment = Alignment(0, -0.46);
+const Alignment kClientBannerArtCompactAlignment = Alignment(0, -0.58);
+const CustomMouseWheelScrollConfig kDesktopMouseWheelScrollConfig =
+    CustomMouseWheelScrollConfig(
+      scrollAmountMultiplier: 2.15,
+      scrollDuration: Duration(milliseconds: 300),
+      scrollCurve: Curves.easeOutQuart,
+      mouseWheelTurnsThrottleTimeMs: 24,
+    );
 
-String _clientBannerAssetPath(String slot) =>
-    '$kClientCardAssetsRoot/$slot/banner.png';
+enum _ClientBannerVariant { full, medium, small }
 
-Future<Set<String>> _loadClientCardAssetManifest() {
-  return _clientCardAssetManifestFuture ??= (() async {
-    try {
-      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
-      return manifest.listAssets().toSet();
-    } catch (_) {
-      return <String>{};
-    }
-  })();
+enum _ClientBannerUsage { compactCard, mediumHero, largeHeader }
+
+String _clientBannerAssetPath(
+  String slot, [
+  _ClientBannerVariant variant = _ClientBannerVariant.full,
+]) {
+  final fileName = switch (variant) {
+    _ClientBannerVariant.full => 'banner.png',
+    _ClientBannerVariant.medium => 'banner-medium.png',
+    _ClientBannerVariant.small => 'banner-small.png',
+  };
+
+  return '$kClientCardAssetsRoot/$slot/$fileName';
 }
+
+List<String> _clientBannerAssetCandidates(
+  String slot,
+  _ClientBannerUsage usage,
+) {
+  final preferredPath = switch (usage) {
+    _ClientBannerUsage.compactCard => _clientBannerAssetPath(
+      slot,
+      _ClientBannerVariant.small,
+    ),
+    _ClientBannerUsage.mediumHero => _clientBannerAssetPath(
+      slot,
+      _ClientBannerVariant.medium,
+    ),
+    _ClientBannerUsage.largeHeader => _clientBannerAssetPath(slot),
+  };
+  final fallbackPath = _clientBannerAssetPath(slot);
+
+  if (preferredPath == fallbackPath) {
+    return <String>[fallbackPath];
+  }
+
+  return <String>[preferredPath, fallbackPath];
+}
+
+String _clientIconAssetPath(String slot) =>
+    '$kClientIconAssetsRoot/$slot/icon.svg';
 
 class AppIcons {
   static const IconData appearance = Icons.palette_outlined;
   static const IconData application = Icons.widgets_outlined;
   static const IconData info = Icons.info_rounded;
+}
+
+class _QddonsDesktopScrollBehavior extends MaterialScrollBehavior {
+  const _QddonsDesktopScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => <PointerDeviceKind>{
+    ...super.dragDevices,
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.touch,
+    PointerDeviceKind.trackpad,
+    PointerDeviceKind.stylus,
+    PointerDeviceKind.invertedStylus,
+  };
+
+  @override
+  Widget buildScrollbar(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
+    return child;
+  }
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) {
+    final platform = getPlatform(context);
+    switch (platform) {
+      case TargetPlatform.windows:
+      case TargetPlatform.macOS:
+      case TargetPlatform.linux:
+        return const BouncingScrollPhysics(
+          parent: AlwaysScrollableScrollPhysics(),
+        );
+      case TargetPlatform.android:
+      case TargetPlatform.fuchsia:
+      case TargetPlatform.iOS:
+        return super.getScrollPhysics(context);
+    }
+  }
+}
+
+bool _shouldUseDesktopImprovedScrolling() {
+  switch (defaultTargetPlatform) {
+    case TargetPlatform.windows:
+    case TargetPlatform.macOS:
+    case TargetPlatform.linux:
+      return true;
+    case TargetPlatform.android:
+    case TargetPlatform.fuchsia:
+    case TargetPlatform.iOS:
+      return false;
+  }
+}
+
+class _DesktopImprovedScrolling extends StatelessWidget {
+  final ScrollController controller;
+  final Widget child;
+
+  const _DesktopImprovedScrolling({
+    required this.controller,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_shouldUseDesktopImprovedScrolling()) {
+      return child;
+    }
+
+    return ImprovedScrolling(
+      scrollController: controller,
+      enableKeyboardScrolling: true,
+      enableCustomMouseWheelScrolling: true,
+      keyboardScrollConfig: const KeyboardScrollConfig(
+        arrowsScrollAmount: 180,
+        arrowsScrollDuration: Duration(milliseconds: 180),
+        pageUpDownScrollAmount: 560,
+        pageUpDownScrollDuration: Duration(milliseconds: 240),
+        spaceScrollAmount: 640,
+        spaceScrollDuration: Duration(milliseconds: 260),
+        defaultHomeEndScrollDuration: Duration(milliseconds: 360),
+        scrollCurve: Curves.easeOutCubic,
+      ),
+      customMouseWheelScrollConfig: kDesktopMouseWheelScrollConfig,
+      child: child,
+    );
+  }
+}
+
+class _DesktopScrollHost extends StatefulWidget {
+  final Widget Function(
+    BuildContext context,
+    ScrollController controller,
+    ScrollPhysics? physics,
+  )
+  builder;
+
+  const _DesktopScrollHost({required this.builder});
+
+  @override
+  State<_DesktopScrollHost> createState() => _DesktopScrollHostState();
+}
+
+class _DesktopScrollHostState extends State<_DesktopScrollHost> {
+  late final ScrollController _controller = ScrollController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final usesImprovedScrolling = _shouldUseDesktopImprovedScrolling();
+    final physics = usesImprovedScrolling
+        ? const NeverScrollableScrollPhysics()
+        : null;
+    final child = widget.builder(context, _controller, physics);
+
+    if (!usesImprovedScrolling) {
+      return child;
+    }
+
+    return _DesktopImprovedScrolling(controller: _controller, child: child);
+  }
 }
 
 // Localization Stub
@@ -205,6 +376,7 @@ class MyApp extends ConsumerWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       showPerformanceOverlay: kShowPerformanceOverlay,
+      scrollBehavior: const _QddonsDesktopScrollBehavior(),
       onGenerateTitle: (context) =>
           AppLocalizations.of(context)?.appTitle ?? 'Qddons Manager',
       themeMode: settings.themeMode,
@@ -347,22 +519,39 @@ class HomeScreen extends ConsumerWidget {
       screenName: 'Home',
       child: Scaffold(
         appBar: AppBar(
+          centerTitle: true,
           title: Text(l10n.appTitle),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.settings_outlined),
-              onPressed: () => Navigator.push(
-                context,
-                PageRouteBuilder(
-                  pageBuilder: (context, animation, secondaryAnimation) =>
-                      const SettingsScreen(),
-                  transitionsBuilder:
-                      (context, animation, secondaryAnimation, child) =>
-                          FadeTransition(opacity: animation, child: child),
+          flexibleSpace: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: _HomeBoostyPillButton(
+                  label: l10n.aboutOpenBoosty,
+                  onPressed: () =>
+                      _openExternalLink(context, kProjectBoostyUri),
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+          ),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: _HomeAppBarIconButton(
+                tooltip: l10n.settingsTitle,
+                icon: Icons.settings_outlined,
+                onPressed: () => Navigator.push(
+                  context,
+                  PageRouteBuilder(
+                    pageBuilder: (context, animation, secondaryAnimation) =>
+                        const SettingsScreen(),
+                    transitionsBuilder:
+                        (context, animation, secondaryAnimation, child) =>
+                            FadeTransition(opacity: animation, child: child),
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
         body: clients.isEmpty
@@ -379,19 +568,24 @@ class HomeScreen extends ConsumerWidget {
                   ],
                 ),
               )
-            : GridView.builder(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 100),
-                addRepaintBoundaries: false,
-                addAutomaticKeepAlives: false,
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 400,
-                  mainAxisExtent: 312,
-                  crossAxisSpacing: 24,
-                  mainAxisSpacing: 24,
+            : _DesktopScrollHost(
+                builder: (context, controller, physics) => GridView.builder(
+                  controller: controller,
+                  physics: physics,
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 100),
+                  addRepaintBoundaries: false,
+                  addAutomaticKeepAlives: false,
+                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 400,
+                    mainAxisExtent: 312,
+                    crossAxisSpacing: 24,
+                    mainAxisSpacing: 24,
+                  ),
+                  itemCount: clients.length,
+                  itemBuilder: (context, index) => RepaintBoundary(
+                    child: _ClientCard(client: clients[index]),
+                  ),
                 ),
-                itemCount: clients.length,
-                itemBuilder: (context, index) =>
-                    RepaintBoundary(child: _ClientCard(client: clients[index])),
               ),
         floatingActionButton: FloatingActionButton.extended(
           onPressed: () => _handleScan(context, ref, locale),
@@ -535,7 +729,8 @@ enum _SettingsWorkspaceSection { appearance, application, about }
 
 class _ClientVisualSpec {
   final String eraLabel;
-  final String? assetPath;
+  final String? bannerAssetSlot;
+  final String? iconAssetPath;
   final IconData emblemIcon;
   final List<Color> gradientColors;
   final Alignment begin;
@@ -547,7 +742,8 @@ class _ClientVisualSpec {
 
   const _ClientVisualSpec({
     required this.eraLabel,
-    required this.assetPath,
+    required this.bannerAssetSlot,
+    required this.iconAssetPath,
     required this.emblemIcon,
     required this.gradientColors,
     required this.begin,
@@ -571,7 +767,8 @@ _ClientVisualSpec _buildClientVisualSpec(
   return switch (profile.family) {
     WowVersionFamily.wrath => _ClientVisualSpec(
       eraLabel: 'Wrath of the Lich King',
-      assetPath: _clientBannerAssetPath('wrath'),
+      bannerAssetSlot: 'wrath',
+      iconAssetPath: _clientIconAssetPath('wrath'),
       emblemIcon: Icons.ac_unit_rounded,
       gradientColors: <Color>[
         soften(const Color(0xFF143A6E), 0.16),
@@ -586,7 +783,8 @@ _ClientVisualSpec _buildClientVisualSpec(
     ),
     WowVersionFamily.cataclysm => _ClientVisualSpec(
       eraLabel: 'Cataclysm',
-      assetPath: _clientBannerAssetPath('cataclysm'),
+      bannerAssetSlot: 'cataclysm',
+      iconAssetPath: _clientIconAssetPath('cataclysm'),
       emblemIcon: Icons.local_fire_department_rounded,
       gradientColors: <Color>[
         soften(const Color(0xFF3A1E14), 0.12),
@@ -601,7 +799,8 @@ _ClientVisualSpec _buildClientVisualSpec(
     ),
     WowVersionFamily.mistsOfPandaria => _ClientVisualSpec(
       eraLabel: 'Mists of Pandaria',
-      assetPath: _clientBannerAssetPath('mists_of_pandaria'),
+      bannerAssetSlot: 'mists_of_pandaria',
+      iconAssetPath: _clientIconAssetPath('mists_of_pandaria'),
       emblemIcon: Icons.spa_rounded,
       gradientColors: <Color>[
         soften(const Color(0xFF0F524A), 0.12),
@@ -616,7 +815,8 @@ _ClientVisualSpec _buildClientVisualSpec(
     ),
     WowVersionFamily.legion => _ClientVisualSpec(
       eraLabel: 'Legion',
-      assetPath: _clientBannerAssetPath('legion'),
+      bannerAssetSlot: 'legion',
+      iconAssetPath: _clientIconAssetPath('legion'),
       emblemIcon: Icons.shield_moon_rounded,
       gradientColors: <Color>[
         soften(const Color(0xFF13211A), 0.1),
@@ -631,7 +831,8 @@ _ClientVisualSpec _buildClientVisualSpec(
     ),
     WowVersionFamily.battleForAzeroth => _ClientVisualSpec(
       eraLabel: 'Battle for Azeroth',
-      assetPath: _clientBannerAssetPath('battle_for_azeroth'),
+      bannerAssetSlot: 'battle_for_azeroth',
+      iconAssetPath: _clientIconAssetPath('battle_for_azeroth'),
       emblemIcon: Icons.explore_rounded,
       gradientColors: <Color>[
         soften(const Color(0xFF1E2949), 0.08),
@@ -646,7 +847,8 @@ _ClientVisualSpec _buildClientVisualSpec(
     ),
     WowVersionFamily.shadowlands => _ClientVisualSpec(
       eraLabel: 'Shadowlands',
-      assetPath: _clientBannerAssetPath('shadowlands'),
+      bannerAssetSlot: 'shadowlands',
+      iconAssetPath: _clientIconAssetPath('shadowlands'),
       emblemIcon: Icons.dark_mode_rounded,
       gradientColors: <Color>[
         soften(const Color(0xFF221B36), 0.08),
@@ -661,7 +863,8 @@ _ClientVisualSpec _buildClientVisualSpec(
     ),
     WowVersionFamily.dragonflight => _ClientVisualSpec(
       eraLabel: 'Dragonflight',
-      assetPath: _clientBannerAssetPath('dragonflight'),
+      bannerAssetSlot: 'dragonflight',
+      iconAssetPath: _clientIconAssetPath('dragonflight'),
       emblemIcon: Icons.auto_awesome_rounded,
       gradientColors: <Color>[
         soften(const Color(0xFF622C24), 0.08),
@@ -676,7 +879,8 @@ _ClientVisualSpec _buildClientVisualSpec(
     ),
     WowVersionFamily.warWithin => _ClientVisualSpec(
       eraLabel: 'The War Within',
-      assetPath: _clientBannerAssetPath('the_war_within'),
+      bannerAssetSlot: 'the_war_within',
+      iconAssetPath: _clientIconAssetPath('the_war_within'),
       emblemIcon: Icons.auto_awesome_motion_rounded,
       gradientColors: <Color>[
         soften(const Color(0xFF352520), 0.08),
@@ -691,7 +895,8 @@ _ClientVisualSpec _buildClientVisualSpec(
     ),
     WowVersionFamily.vanilla => _ClientVisualSpec(
       eraLabel: client.type == ClientType.classic ? 'Classic Era' : 'Vanilla',
-      assetPath: _clientBannerAssetPath('classic_era'),
+      bannerAssetSlot: 'classic_era',
+      iconAssetPath: _clientIconAssetPath('classic_era'),
       emblemIcon: Icons.auto_awesome_rounded,
       gradientColors: <Color>[
         soften(const Color(0xFF4B3423), 0.12),
@@ -708,7 +913,8 @@ _ClientVisualSpec _buildClientVisualSpec(
       eraLabel: client.type == ClientType.classic
           ? 'Burning Crusade Classic'
           : 'Burning Crusade',
-      assetPath: _clientBannerAssetPath('burning_crusade'),
+      bannerAssetSlot: 'burning_crusade',
+      iconAssetPath: _clientIconAssetPath('burning_crusade'),
       emblemIcon: Icons.shield_rounded,
       gradientColors: <Color>[
         soften(const Color(0xFF214253), 0.1),
@@ -723,7 +929,8 @@ _ClientVisualSpec _buildClientVisualSpec(
     ),
     WowVersionFamily.warlordsOfDraenor => _ClientVisualSpec(
       eraLabel: 'Warlords of Draenor',
-      assetPath: _clientBannerAssetPath('warlords_of_draenor'),
+      bannerAssetSlot: 'warlords_of_draenor',
+      iconAssetPath: _clientIconAssetPath('warlords_of_draenor'),
       emblemIcon: Icons.gavel_rounded,
       gradientColors: <Color>[
         soften(const Color(0xFF4C241D), 0.08),
@@ -738,7 +945,8 @@ _ClientVisualSpec _buildClientVisualSpec(
     ),
     _ => _ClientVisualSpec(
       eraLabel: client.defaultDisplayName.split(' (').first,
-      assetPath: _clientBannerAssetPath('generic'),
+      bannerAssetSlot: 'generic',
+      iconAssetPath: _clientIconAssetPath('generic'),
       emblemIcon: Icons.extension_rounded,
       gradientColors: <Color>[
         colorScheme.primaryContainer,
@@ -767,11 +975,13 @@ String _clientBranchLabel(AppLocalizations l10n, ClientType type) {
 class _ClientVisualBanner extends StatelessWidget {
   final _ClientVisualSpec spec;
   final BorderRadius borderRadius;
+  final _ClientBannerUsage bannerUsage;
   final bool compact;
 
   const _ClientVisualBanner({
     required this.spec,
     required this.borderRadius,
+    required this.bannerUsage,
     this.compact = false,
   });
 
@@ -832,18 +1042,26 @@ class _ClientVisualBanner extends StatelessWidget {
               ),
             ),
           ),
-          if (spec.assetPath != null)
+          if (spec.bannerAssetSlot != null)
             _OptionalClientBannerAsset(
-              assetPath: spec.assetPath!,
+              assetCandidates: _clientBannerAssetCandidates(
+                spec.bannerAssetSlot!,
+                bannerUsage,
+              ),
               opacity: compact ? 0.2 : 0.28,
+              alignment: compact
+                  ? kClientBannerArtCompactAlignment
+                  : kClientBannerArtAlignment,
+              soften: compact,
             ),
           Positioned(
             right: compact ? 18 : 20,
             bottom: compact ? 10 : 14,
-            child: Icon(
-              spec.emblemIcon,
+            child: _ClientEraGlyphAsset(
+              spec: spec,
               size: compact ? 56 : 72,
-              color: spec.overlayColor.withValues(alpha: compact ? 0.14 : 0.18),
+              color: spec.overlayColor,
+              opacity: compact ? 0.14 : 0.18,
             ),
           ),
         ],
@@ -853,37 +1071,56 @@ class _ClientVisualBanner extends StatelessWidget {
 }
 
 class _OptionalClientBannerAsset extends StatelessWidget {
-  final String assetPath;
+  final List<String> assetCandidates;
   final double opacity;
+  final Alignment alignment;
+  final bool soften;
 
   const _OptionalClientBannerAsset({
-    required this.assetPath,
+    required this.assetCandidates,
     required this.opacity,
+    required this.alignment,
+    this.soften = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<Set<String>>(
-      future: _loadClientCardAssetManifest(),
-      builder: (context, snapshot) {
-        final availableAssets = snapshot.data;
-        if (availableAssets == null || !availableAssets.contains(assetPath)) {
-          return const SizedBox.shrink();
-        }
+    Widget buildImage(int index, double effectiveOpacity) {
+      if (index >= assetCandidates.length) {
+        return const SizedBox.shrink();
+      }
 
-        return Opacity(
-          opacity: opacity,
-          child: Image.asset(
-            assetPath,
-            fit: BoxFit.cover,
-            filterQuality: FilterQuality.low,
+      return Opacity(
+        opacity: effectiveOpacity,
+        child: Image.asset(
+          assetCandidates[index],
+          fit: BoxFit.cover,
+          alignment: alignment,
+          filterQuality: FilterQuality.high,
+          errorBuilder: (context, error, stackTrace) =>
+              buildImage(index + 1, effectiveOpacity),
+        ),
+      );
+    }
+
+    if (!soften) {
+      return buildImage(0, opacity);
+    }
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned.fill(
+          child: ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(sigmaX: 1.6, sigmaY: 1.6),
+            child: buildImage(0, opacity * 0.92),
           ),
-        );
-      },
+        ),
+        Positioned.fill(child: buildImage(0, opacity * 0.54)),
+      ],
     );
   }
 }
-
 class _ClientEraMedallion extends StatelessWidget {
   final _ClientVisualSpec spec;
   final double size;
@@ -892,28 +1129,51 @@ class _ClientEraMedallion extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(size * 0.36),
-        color: spec.badgeColor.withValues(alpha: 0.96),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.22),
-          width: 1,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 14,
-            offset: const Offset(0, 6),
-          ),
-        ],
+    return SizedBox.square(
+      dimension: size,
+      child: Center(
+        child: _ClientEraGlyphAsset(spec: spec, size: size),
       ),
-      child: Icon(
-        spec.emblemIcon,
-        color: spec.badgeForeground,
-        size: size * 0.46,
+    );
+  }
+}
+
+class _ClientEraGlyphAsset extends StatelessWidget {
+  final _ClientVisualSpec spec;
+  final double size;
+  final Color? color;
+  final double opacity;
+
+  const _ClientEraGlyphAsset({
+    required this.spec,
+    required this.size,
+    this.color,
+    this.opacity = 1,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fallback = Icon(
+      spec.emblemIcon,
+      size: size,
+      color: color ?? spec.badgeForeground,
+    );
+
+    if (spec.iconAssetPath == null) {
+      return Opacity(opacity: opacity, child: fallback);
+    }
+
+    return Opacity(
+      opacity: opacity,
+      child: SvgPicture.asset(
+        spec.iconAssetPath!,
+        width: size,
+        height: size,
+        fit: BoxFit.contain,
+        colorFilter: color == null
+            ? null
+            : ColorFilter.mode(color!, BlendMode.srcIn),
+        placeholderBuilder: (context) => fallback,
       ),
     );
   }
@@ -958,6 +1218,150 @@ class _ClientPathLine extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeBoostyPillButton extends StatefulWidget {
+  final String label;
+  final VoidCallback onPressed;
+
+  const _HomeBoostyPillButton({required this.label, required this.onPressed});
+
+  @override
+  State<_HomeBoostyPillButton> createState() => _HomeBoostyPillButtonState();
+}
+
+class _HomeBoostyPillButtonState extends State<_HomeBoostyPillButton> {
+  bool _hovered = false;
+
+  void _setHovered(bool value) {
+    if (_hovered == value) {
+      return;
+    }
+    setState(() {
+      _hovered = value;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final labelStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
+      height: 1,
+      color: colorScheme.onTertiaryContainer,
+      fontWeight: FontWeight.w700,
+    );
+    final textScaler = MediaQuery.textScalerOf(context);
+    final direction = Directionality.of(context);
+    final textPainter = TextPainter(
+      text: TextSpan(text: widget.label, style: labelStyle),
+      textDirection: direction,
+      textScaler: textScaler,
+      maxLines: 1,
+    )..layout(minWidth: 0, maxWidth: 320);
+    final expandedWidth = (40 + 8 + textPainter.width + 16)
+        .clamp(40, 280)
+        .toDouble();
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => _setHovered(true),
+      onExit: (_) => _setHovered(false),
+      child: Tooltip(
+        message: widget.label,
+        waitDuration: const Duration(milliseconds: 350),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: widget.onPressed,
+            onHover: _setHovered,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              width: _hovered ? expandedWidth : 40,
+              height: 40,
+              decoration: ShapeDecoration(
+                color: colorScheme.tertiaryContainer.withValues(alpha: 0.9),
+                shape: const StadiumBorder(),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: Center(
+                      child: Icon(
+                        Icons.coffee_rounded,
+                        size: 18,
+                        color: colorScheme.onTertiaryContainer,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: ClipRect(
+                      child: AnimatedAlign(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                        alignment: Alignment.centerLeft,
+                        widthFactor: _hovered ? 1 : 0,
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 2, right: 14),
+                          child: Text(
+                            widget.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            softWrap: false,
+                            style: labelStyle,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeAppBarIconButton extends StatelessWidget {
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  const _HomeAppBarIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 350),
+      child: Material(
+        color: colorScheme.surfaceContainerHigh.withValues(alpha: 0.92),
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: Icon(icon, size: 20, color: colorScheme.onSurface),
+          ),
         ),
       ),
     );
@@ -1011,6 +1415,7 @@ class _ClientCard extends ConsumerWidget {
                     borderRadius: const BorderRadius.vertical(
                       top: Radius.circular(28),
                     ),
+                    bannerUsage: _ClientBannerUsage.compactCard,
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(18, 16, 14, 14),
@@ -1190,12 +1595,13 @@ class ClientDetailsScreen extends ConsumerStatefulWidget {
 }
 
 class _ClientDetailsScreenState extends ConsumerState<ClientDetailsScreen> {
-  final PageController _pageController = PageController();
   final GlobalKey<_LocalAddonsViewState> _localAddonsKey =
       GlobalKey<_LocalAddonsViewState>();
+  final ScrollController _nestedScrollController = ScrollController();
   late GameClient _client;
   int _currentIndex = 0;
   int _selectedLocalAddons = 0;
+  bool _isLaunchingGame = false;
 
   @override
   void initState() {
@@ -1203,38 +1609,140 @@ class _ClientDetailsScreenState extends ConsumerState<ClientDetailsScreen> {
     _client = widget.client;
   }
 
-  void _onNavTap(int index) {
-    setState(() => _currentIndex = index);
-    _pageController.animateToPage(
-      index,
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeOutCubic,
-    );
-  }
-
   @override
   void dispose() {
-    _pageController.dispose();
+    _nestedScrollController.dispose();
     super.dispose();
+  }
+
+  void _onNavTap(int index) {
+    if (_currentIndex == index) {
+      return;
+    }
+
+    if (_currentIndex == 0) {
+      _localAddonsKey.currentState?.clearSelection();
+    }
+
+    setState(() => _currentIndex = index);
+  }
+
+  bool get _canLaunchGame {
+    final executableName = _client.executableName?.trim() ?? '';
+    return executableName.isNotEmpty;
+  }
+
+  Future<void> _handleLaunchGame() async {
+    if (_isLaunchingGame) {
+      return;
+    }
+
+    final l10n = AppLocalizations.of(context)!;
+    setState(() => _isLaunchingGame = true);
+
+    try {
+      await ref.read(launchGameUseCaseProvider)(_client);
+    } on LaunchGameException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      final message = switch (error.failure) {
+        LaunchGameFailure.missingExecutableName =>
+          l10n.clientLaunchMissingExecutable,
+        LaunchGameFailure.executableNotFound =>
+          l10n.clientLaunchMissingExecutable,
+        LaunchGameFailure.invalidClientPath => l10n.clientLaunchInvalidPath,
+        LaunchGameFailure.launchFailed => l10n.clientLaunchFailed,
+      };
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n.clientLaunchFailed),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isLaunchingGame = false);
+      }
+    }
+  }
+
+  Widget _buildCurrentTab() {
+    if (_currentIndex == 0) {
+      return _LocalAddonsView(
+        key: _localAddonsKey,
+        client: _client,
+        onSelectionChanged: (count) {
+          if (_selectedLocalAddons != count) {
+            setState(() => _selectedLocalAddons = count);
+          }
+        },
+      );
+    }
+
+    return KeyedSubtree(
+      key: ValueKey<String>('client-search-${_client.id}'),
+      child: _SearchAddonsView(client: _client),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final locale = ref.watch(appSettingsProvider).locale.languageCode;
+    final l10n = AppLocalizations.of(context)!;
     final isSelectionMode = _currentIndex == 0 && _selectedLocalAddons > 0;
+    final useDesktopImprovedScrolling = _shouldUseDesktopImprovedScrolling();
+    final scrollView = CustomScrollView(
+      controller: _nestedScrollController,
+      physics: useDesktopImprovedScrolling
+          ? const NeverScrollableScrollPhysics()
+          : null,
+      slivers: [
+        SliverPersistentHeader(
+          pinned: true,
+          delegate: _ClientHeroHeaderDelegate(
+            client: _client,
+            launchLabel: l10n.clientLaunchAction,
+            onLaunch: _canLaunchGame ? _handleLaunchGame : null,
+            isLaunching: _isLaunchingGame,
+          ),
+        ),
+        _buildCurrentTab(),
+      ],
+    );
+    final scrollableBody = _currentIndex == 0
+        ? RefreshIndicator(
+            onRefresh: () =>
+                ref.read(localAddonsProvider(_client).notifier).refresh(),
+            child: scrollView,
+          )
+        : scrollView;
 
     return PerformanceTrackedScope(
       screenName: 'ClientDetails',
       child: Scaffold(
         appBar: AppBar(
-          title: Text(
-            isSelectionMode
-                ? AppLocalizationsStub.selectedCount(
+          title: isSelectionMode
+              ? Text(
+                  AppLocalizationsStub.selectedCount(
                     locale,
                     _selectedLocalAddons,
-                  )
-                : _client.resolvedDisplayName,
-          ),
+                  ),
+                )
+              : null,
           actions: [
             if (isSelectionMode) ...[
               IconButton(
@@ -1279,22 +1787,13 @@ class _ClientDetailsScreenState extends ConsumerState<ClientDetailsScreen> {
         ),
         body: Stack(
           children: [
-            PageView(
-              controller: _pageController,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                _LocalAddonsView(
-                  key: _localAddonsKey,
-                  client: _client,
-                  onSelectionChanged: (count) {
-                    if (_selectedLocalAddons != count) {
-                      setState(() => _selectedLocalAddons = count);
-                    }
-                  },
-                ),
-                _SearchAddonsView(client: _client),
-              ],
-            ),
+            if (useDesktopImprovedScrolling)
+              _DesktopImprovedScrolling(
+                controller: _nestedScrollController,
+                child: scrollableBody,
+              )
+            else
+              scrollableBody,
             Align(
               alignment: Alignment.bottomCenter,
               child: Padding(
@@ -1782,237 +2281,240 @@ class _LocalAddonsViewState extends ConsumerState<_LocalAddonsView> {
     final currentAddons =
         addonsAsync.valueOrNull ?? const <InstalledAddonGroup>[];
 
-    return Column(
-      children: [
-        _ClientHeader(client: widget.client),
-        _buildActionBar(context, locale, currentAddons),
-        const SizedBox(height: 16),
-        Expanded(
-          child: addonsAsync.when(
-            data: (addons) {
-              _syncSelection(addons);
+    return SliverMainAxisGroup(
+      slivers: [
+        const SliverToBoxAdapter(child: SizedBox(height: 12)),
+        SliverToBoxAdapter(
+          child: _buildActionBar(context, locale, currentAddons),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 16)),
+        ...addonsAsync.when(
+          data: (addons) {
+            _syncSelection(addons);
 
-              if (addons.isEmpty) {
-                return RefreshIndicator(
-                  onRefresh: () => ref
-                      .read(localAddonsProvider(widget.client).notifier)
-                      .refresh(),
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 140),
-                    children: [
-                      const SizedBox(height: 120),
-                      Icon(
-                        Icons.inventory_2_outlined,
-                        size: 64,
-                        color: colorScheme.outlineVariant,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        AppLocalizationsStub.noLocalAddons(locale),
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: colorScheme.outline,
+            if (addons.isEmpty) {
+              return <Widget>[
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 24, 24, 140),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.inventory_2_outlined,
+                          size: 64,
+                          color: colorScheme.outlineVariant,
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 16),
+                        Text(
+                          AppLocalizationsStub.noLocalAddons(locale),
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyLarge
+                              ?.copyWith(color: colorScheme.outline),
+                        ),
+                      ],
+                    ),
                   ),
-                );
-              }
+                ),
+              ];
+            }
 
-              return RefreshIndicator(
-                onRefresh: () => ref
-                    .read(localAddonsProvider(widget.client).notifier)
-                    .refresh(),
-                child: ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 140),
-                  addRepaintBoundaries: false,
-                  addAutomaticKeepAlives: false,
-                  itemCount: addons.length,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(height: 12),
-                  itemBuilder: (context, index) {
+            return <Widget>[
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 140),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate((context, index) {
                     final addon = addons[index];
                     final isSelected = _selectedIds.contains(addon.id);
 
-                    return RepaintBoundary(
-                      child: Card(
-                        elevation: 0,
-                        clipBehavior: Clip.antiAlias,
-                        color: isSelected
-                            ? colorScheme.secondaryContainer.withValues(
-                                alpha: 0.55,
-                              )
-                            : colorScheme.surfaceContainerLow,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          side: BorderSide(
-                            color:
-                                (isSelected
-                                        ? colorScheme.secondary
-                                        : colorScheme.outlineVariant)
-                                    .withValues(alpha: 0.35),
-                          ),
-                        ),
-                        child: Theme(
-                          data: Theme.of(
-                            context,
-                          ).copyWith(dividerColor: Colors.transparent),
-                          child: ExpansionTile(
-                            backgroundColor: Colors.transparent,
-                            collapsedBackgroundColor: Colors.transparent,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(24),
-                            ),
-                            collapsedShape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(24),
-                            ),
-                            tilePadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            childrenPadding: const EdgeInsets.fromLTRB(
-                              20,
-                              0,
-                              20,
-                              16,
-                            ),
-                            leading: Checkbox(
-                              value: isSelected,
-                              onChanged: (_) => _toggleSelection(addon.id),
-                            ),
-                            title: GestureDetector(
-                              onLongPress: () => _toggleSelection(addon.id),
-                              child: Row(
-                                children: [
-                                  _InstalledAddonGroupThumbnail(group: addon),
-                                  const SizedBox(width: 14),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          addon.displayName,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleMedium
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.w700,
-                                              ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Wrap(
-                                          spacing: 8,
-                                          runSpacing: 8,
-                                          children: [
-                                            _InfoChip(
-                                              icon: Icons.folder_copy_outlined,
-                                              label:
-                                                  AppLocalizationsStub.addonFolders(
-                                                    locale,
-                                                    addon
-                                                        .installedFolders
-                                                        .length,
-                                                  ),
-                                            ),
-                                            _InfoChip(
-                                              icon: addon.isManaged
-                                                  ? Icons.link_rounded
-                                                  : Icons
-                                                        .home_repair_service_rounded,
-                                              label:
-                                                  addon.providerName == 'Manual'
-                                                  ? AppLocalizationsStub.localManual(
-                                                      locale,
-                                                    )
-                                                  : addon.providerName ??
-                                                        AppLocalizationsStub.localManual(
-                                                          locale,
-                                                        ),
-                                            ),
-                                            if ((addon.version ?? '')
-                                                .isNotEmpty)
-                                              _InfoChip(
-                                                icon: Icons.sell_outlined,
-                                                label: addon.version!,
-                                              ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            children: [
-                              for (final folderName in addon.installedFolders)
-                                Container(
-                                  margin: const EdgeInsets.only(top: 8),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 12,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: colorScheme.surfaceContainerHighest
-                                        .withValues(alpha: 0.55),
-                                    borderRadius: BorderRadius.circular(18),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.subdirectory_arrow_right_rounded,
-                                        color: colorScheme.primary,
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Text(
-                                          folderName,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodyMedium
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              const SizedBox(height: 12),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: FilledButton.tonalIcon(
-                                  onPressed: () =>
-                                      _handleDeleteGroups([addon], locale),
-                                  icon: const Icon(
-                                    Icons.delete_outline_rounded,
-                                  ),
-                                  label: Text(
-                                    AppLocalizationsStub.delete(locale),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        bottom: index == addons.length - 1 ? 0 : 12,
+                      ),
+                      child: RepaintBoundary(
+                        child: _InstalledAddonCard(
+                          addon: addon,
+                          isSelected: isSelected,
+                          locale: locale,
+                          onToggleSelection: () => _toggleSelection(addon.id),
+                          onDelete: () => _handleDeleteGroups([addon], locale),
                         ),
                       ),
                     );
-                  },
+                  }, childCount: addons.length),
                 ),
-              );
-            },
-            loading: () =>
-                _LoadingState(label: l10n.clientDetailsLoadingAddons),
-            error: (e, s) => _StatusMessage(
-              icon: Icons.error_outline_rounded,
-              title: l10n.clientDetailsLoadErrorTitle,
-              message: l10n.clientDetailsLoadErrorMessage(_formatError(e)),
+              ),
+            ];
+          },
+          loading: () => <Widget>[
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: _LoadingState(label: l10n.clientDetailsLoadingAddons),
             ),
-          ),
+          ],
+          error: (e, s) => <Widget>[
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: _StatusMessage(
+                icon: Icons.error_outline_rounded,
+                title: l10n.clientDetailsLoadErrorTitle,
+                message: l10n.clientDetailsLoadErrorMessage(_formatError(e)),
+              ),
+            ),
+          ],
         ),
       ],
+    );
+  }
+}
+
+class _InstalledAddonCard extends StatelessWidget {
+  final InstalledAddonGroup addon;
+  final bool isSelected;
+  final String locale;
+  final VoidCallback onToggleSelection;
+  final VoidCallback onDelete;
+
+  const _InstalledAddonCard({
+    required this.addon,
+    required this.isSelected,
+    required this.locale,
+    required this.onToggleSelection,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Card(
+      elevation: 0,
+      clipBehavior: Clip.antiAlias,
+      color: isSelected
+          ? colorScheme.secondaryContainer.withValues(alpha: 0.55)
+          : colorScheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(
+          color:
+              (isSelected ? colorScheme.secondary : colorScheme.outlineVariant)
+                  .withValues(alpha: 0.35),
+        ),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          key: PageStorageKey<String>('installed-addon-expansion-${addon.id}'),
+          backgroundColor: Colors.transparent,
+          collapsedBackgroundColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          collapsedShape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          leading: Checkbox(
+            value: isSelected,
+            onChanged: (_) => onToggleSelection(),
+          ),
+          title: GestureDetector(
+            onLongPress: onToggleSelection,
+            child: Row(
+              children: [
+                _InstalledAddonGroupThumbnail(group: addon),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        addon.displayName,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _InfoChip(
+                            icon: Icons.folder_copy_outlined,
+                            label: AppLocalizationsStub.addonFolders(
+                              locale,
+                              addon.installedFolders.length,
+                            ),
+                          ),
+                          _InfoChip(
+                            icon: addon.isManaged
+                                ? Icons.link_rounded
+                                : Icons.home_repair_service_rounded,
+                            label: addon.providerName == 'Manual'
+                                ? AppLocalizationsStub.localManual(locale)
+                                : addon.providerName ??
+                                      AppLocalizationsStub.localManual(locale),
+                          ),
+                          if ((addon.version ?? '').isNotEmpty)
+                            _InfoChip(
+                              icon: Icons.sell_outlined,
+                              label: addon.version!,
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          children: [
+            for (final folderName in addon.installedFolders)
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.55,
+                  ),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.subdirectory_arrow_right_rounded,
+                      color: colorScheme.primary,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        folderName,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.tonalIcon(
+                onPressed: onDelete,
+                icon: const Icon(Icons.delete_outline_rounded),
+                label: Text(AppLocalizationsStub.delete(locale)),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -2207,6 +2709,7 @@ class _FeedIntroCard extends StatelessWidget {
 
 class _SearchAddonsView extends ConsumerStatefulWidget {
   final GameClient client;
+
   const _SearchAddonsView({required this.client});
 
   @override
@@ -2215,31 +2718,32 @@ class _SearchAddonsView extends ConsumerStatefulWidget {
 
 class _SearchAddonsViewState extends ConsumerState<_SearchAddonsView> {
   final TextEditingController _searchController = TextEditingController();
-  final ValueNotifier<String> _queryNotifier = ValueNotifier<String>('');
+  String _query = '';
 
   ClientSearchScopeKey get _scopeKey => ClientSearchScopeKey(
     clientId: widget.client.id,
     gameVersion: widget.client.version,
   );
 
-  String get _normalizedQuery => _queryNotifier.value;
+  String get _normalizedQuery => _query;
 
   @override
   void dispose() {
     _searchController.dispose();
-    _queryNotifier.dispose();
     super.dispose();
   }
 
   void _clearSearch() {
     _searchController.clear();
-    _queryNotifier.value = '';
+    setState(() => _query = '');
     ref.invalidate(searchResultsProvider(_scopeKey));
   }
 
   void _handleQueryChanged(String value) {
     final normalizedValue = value.trim();
-    _queryNotifier.value = normalizedValue;
+    if (_query != normalizedValue) {
+      setState(() => _query = normalizedValue);
+    }
 
     if (normalizedValue.isEmpty) {
       ref.invalidate(searchResultsProvider(_scopeKey));
@@ -2252,14 +2756,20 @@ class _SearchAddonsViewState extends ConsumerState<_SearchAddonsView> {
   }
 
   Widget _buildDiscoveryFeed() {
-    return _DiscoveryFeedContent(client: widget.client, scopeKey: _scopeKey);
+    return _SearchFeedSliverContent(
+      client: widget.client,
+      scopeKey: _scopeKey,
+      query: '',
+      isDiscoveryMode: true,
+    );
   }
 
   Widget _buildSearchResults() {
-    return _SearchResultsContent(
+    return _SearchFeedSliverContent(
       client: widget.client,
       scopeKey: _scopeKey,
       query: _normalizedQuery,
+      isDiscoveryMode: false,
     );
   }
 
@@ -2267,181 +2777,184 @@ class _SearchAddonsViewState extends ConsumerState<_SearchAddonsView> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colorScheme = Theme.of(context).colorScheme;
+    final isDiscoveryMode = _normalizedQuery.isEmpty;
+    final sectionTitle = isDiscoveryMode
+        ? l10n.discoveryFeedTitle(widget.client.version)
+        : l10n.searchResultsTitle(_normalizedQuery);
+    final sectionSubtitle = isDiscoveryMode
+        ? l10n.discoveryFeedSubtitle(widget.client.version)
+        : l10n.searchResultsSubtitle(widget.client.version);
 
-    return Column(
-      children: [
-        _ClientHeader(client: widget.client),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: SearchBar(
-            controller: _searchController,
-            hintText: l10n.searchAddonsHint,
-            leading: const Icon(Icons.search_rounded),
-            trailing: [
-              ValueListenableBuilder<String>(
-                valueListenable: _queryNotifier,
-                builder: (context, query, _) {
-                  if (query.isEmpty) {
-                    return const SizedBox.shrink();
-                  }
-
-                  return IconButton(
+    return SliverMainAxisGroup(
+      slivers: [
+        const SliverToBoxAdapter(child: SizedBox(height: 12)),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: SearchBar(
+              controller: _searchController,
+              hintText: l10n.searchAddonsHint,
+              leading: const Icon(Icons.search_rounded),
+              trailing: [
+                if (_normalizedQuery.isNotEmpty)
+                  IconButton(
                     icon: const Icon(Icons.clear_rounded),
                     onPressed: _clearSearch,
-                  );
-                },
+                  ),
+              ],
+              onChanged: _handleQueryChanged,
+              elevation: WidgetStateProperty.all(0),
+              backgroundColor: WidgetStateProperty.all(
+                colorScheme.surfaceContainer,
               ),
-            ],
-            onChanged: _handleQueryChanged,
-            elevation: WidgetStateProperty.all(0),
-            backgroundColor: WidgetStateProperty.all(
-              colorScheme.surfaceContainer,
-            ),
-            shape: WidgetStateProperty.all(
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: WidgetStateProperty.all(
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              ),
             ),
           ),
         ),
-        const SizedBox(height: 16),
-        Expanded(
-          child: ValueListenableBuilder<String>(
-            valueListenable: _queryNotifier,
-            builder: (context, query, _) {
-              final isDiscoveryMode = query.isEmpty;
-              final sectionTitle = isDiscoveryMode
-                  ? l10n.discoveryFeedTitle(widget.client.version)
-                  : l10n.searchResultsTitle(query);
-              final sectionSubtitle = isDiscoveryMode
-                  ? l10n.discoveryFeedSubtitle(widget.client.version)
-                  : l10n.searchResultsSubtitle(widget.client.version);
-
-              return PerformanceTrackedScope(
-                screenName: isDiscoveryMode
-                    ? 'SearchDiscovery'
-                    : 'SearchResults',
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: _FeedIntroCard(
-                        icon: isDiscoveryMode
-                            ? Icons.auto_awesome_rounded
-                            : Icons.search_rounded,
-                        title: sectionTitle,
-                        subtitle: sectionSubtitle,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Expanded(
-                      child: isDiscoveryMode
-                          ? _buildDiscoveryFeed()
-                          : _buildSearchResults(),
-                    ),
-                  ],
-                ),
-              );
-            },
+        const SliverToBoxAdapter(child: SizedBox(height: 16)),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: _FeedIntroCard(
+              icon: isDiscoveryMode
+                  ? Icons.auto_awesome_rounded
+                  : Icons.search_rounded,
+              title: sectionTitle,
+              subtitle: sectionSubtitle,
+            ),
           ),
         ),
+        const SliverToBoxAdapter(child: SizedBox(height: 16)),
+        if (isDiscoveryMode) _buildDiscoveryFeed() else _buildSearchResults(),
       ],
     );
   }
 }
 
-class _ClientHeader extends StatelessWidget {
+class _ClientHeroHeaderDelegate extends SliverPersistentHeaderDelegate {
   final GameClient client;
-  const _ClientHeader({required this.client});
+  final String launchLabel;
+  final VoidCallback? onLaunch;
+  final bool isLaunching;
+
+  const _ClientHeroHeaderDelegate({
+    required this.client,
+    required this.launchLabel,
+    required this.onLaunch,
+    required this.isLaunching,
+  });
 
   @override
-  Widget build(BuildContext context) {
+  double get minExtent => 100;
+
+  @override
+  double get maxExtent => 232;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
     final l10n = AppLocalizations.of(context)!;
     final colorScheme = Theme.of(context).colorScheme;
     final spec = _buildClientVisualSpec(client, colorScheme);
-    final eraLabel = client.defaultDisplayName.split(' (').first;
+    final branchLabel = _clientBranchLabel(l10n, client.type);
+    final collapseRange = maxExtent - minExtent;
+    final collapseT = collapseRange <= 0
+        ? 1.0
+        : (shrinkOffset / collapseRange).clamp(0.0, 1.0);
+    final visualT = Curves.easeInOutCubicEmphasized.transform(collapseT);
+    final surfaceRadius = 30 - (8 * visualT);
+    final medallionSize = 56 - (12 * visualT);
+    final expandedMetaOpacity = (1 - (visualT * 1.2)).clamp(0.0, 1.0);
+    final topBadgeOpacity = (1 - (visualT * 1.45)).clamp(0.0, 1.0);
+    final compactMode = visualT > 0.7;
 
     return RepaintBoundary(
       child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Container(
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(
-              color: colorScheme.outlineVariant.withValues(alpha: 0.35),
-            ),
-          ),
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+        child: Material(
+          color: colorScheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(surfaceRadius),
           clipBehavior: Clip.antiAlias,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Stack(
+            fit: StackFit.expand,
             children: [
-              SizedBox(
-                height: 126,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _ClientVisualBanner(
-                      spec: spec,
-                      borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(28),
-                      ),
-                      compact: true,
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              _ClientHeroBadge(
-                                label: _clientBranchLabel(l10n, client.type),
-                                backgroundColor: Colors.black.withValues(
-                                  alpha: 0.18,
-                                ),
-                                foregroundColor: Colors.white,
-                              ),
-                              _ClientHeroBadge(
-                                label: client.version,
-                                backgroundColor: spec.badgeColor.withValues(
-                                  alpha: 0.96,
-                                ),
-                                foregroundColor: spec.badgeForeground,
-                              ),
-                            ],
-                          ),
-                          const Spacer(),
-                          Text(
-                            eraLabel,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.headlineSmall
-                                ?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -0.4,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+              _ClientVisualBanner(
+                spec: spec,
+                borderRadius: BorderRadius.circular(surfaceRadius),
+                bannerUsage: _ClientBannerUsage.mediumHero,
+                compact: collapseT > 0.42,
+              ),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.08),
+                      Colors.black.withValues(alpha: 0.34),
+                    ],
+                  ),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+                padding: EdgeInsets.fromLTRB(
+                  20 - (4 * visualT),
+                  16 - (2 * visualT),
+                  20 - (4 * visualT),
+                  16 - (4 * visualT),
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    SizedBox(
+                      height: 30 * topBadgeOpacity,
+                      child: Opacity(
+                        opacity: topBadgeOpacity,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _ClientHeroBadge(
+                              label: branchLabel,
+                              backgroundColor: Colors.black.withValues(
+                                alpha: 0.18,
+                              ),
+                              foregroundColor: Colors.white,
+                            ),
+                            _ClientHeroBadge(
+                              label: client.version,
+                              backgroundColor: spec.badgeColor.withValues(
+                                alpha: 0.96,
+                              ),
+                              foregroundColor: spec.badgeForeground,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 10 * (1 - visualT)),
+                    const Spacer(),
                     Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        _ClientEraMedallion(spec: spec, size: 54),
-                        const SizedBox(width: 14),
+                        Transform.scale(
+                          scale: 1 - (0.08 * visualT),
+                          alignment: Alignment.centerLeft,
+                          child: _ClientEraMedallion(
+                            spec: spec,
+                            size: medallionSize.clamp(40.0, 56.0),
+                          ),
+                        ),
+                        SizedBox(width: 14 - (4 * visualT)),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
                                 client.resolvedDisplayName,
@@ -2449,26 +2962,50 @@ class _ClientHeader extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context).textTheme.titleLarge
                                     ?.copyWith(
+                                      color: Colors.white,
                                       fontWeight: FontWeight.w800,
                                       letterSpacing: -0.4,
                                     ),
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '${_clientBranchLabel(l10n, client.type)} · ${client.version}',
-                                style: Theme.of(context).textTheme.labelMedium
-                                    ?.copyWith(
-                                      color: colorScheme.primary,
-                                      fontWeight: FontWeight.w700,
-                                    ),
+                              SizedBox(height: 6 * expandedMetaOpacity),
+                              Opacity(
+                                opacity: expandedMetaOpacity,
+                                child: Text(
+                                  '$branchLabel · ${client.version}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.labelLarge
+                                      ?.copyWith(
+                                        color: Colors.white.withValues(
+                                          alpha: 0.9,
+                                        ),
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                ),
                               ),
                             ],
                           ),
                         ),
+                        const SizedBox(width: 12),
+                        _ClientHeroLaunchButton(
+                          label: launchLabel,
+                          isCompact: compactMode,
+                          isLaunching: isLaunching,
+                          onPressed: onLaunch,
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 16),
-                    _ClientPathLine(path: client.path),
+                    SizedBox(height: 12 * expandedMetaOpacity),
+                    ClipRect(
+                      child: Align(
+                        heightFactor: expandedMetaOpacity,
+                        alignment: Alignment.topCenter,
+                        child: Opacity(
+                          opacity: expandedMetaOpacity,
+                          child: _ClientHeaderPathPill(path: client.path),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -2478,13 +3015,126 @@ class _ClientHeader extends StatelessWidget {
       ),
     );
   }
+
+  @override
+  bool shouldRebuild(covariant _ClientHeroHeaderDelegate oldDelegate) {
+    return oldDelegate.client != client ||
+        oldDelegate.launchLabel != launchLabel ||
+        oldDelegate.onLaunch != onLaunch ||
+        oldDelegate.isLaunching != isLaunching;
+  }
 }
 
-class _DiscoveryFeedContent extends ConsumerWidget {
+class _ClientHeroLaunchButton extends StatelessWidget {
+  final String label;
+  final bool isCompact;
+  final bool isLaunching;
+  final VoidCallback? onPressed;
+
+  const _ClientHeroLaunchButton({
+    required this.label,
+    required this.isCompact,
+    required this.isLaunching,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = isLaunching
+        ? const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : const Icon(Icons.play_arrow_rounded);
+
+    if (isCompact) {
+      return IconButton.filledTonal(
+        tooltip: label,
+        onPressed: isLaunching ? null : onPressed,
+        icon: icon,
+        style: IconButton.styleFrom(
+          minimumSize: const Size(44, 44),
+          backgroundColor: Colors.white.withValues(alpha: 0.14),
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: Colors.white.withValues(alpha: 0.08),
+          disabledForegroundColor: Colors.white.withValues(alpha: 0.55),
+        ),
+      );
+    }
+
+    return FilledButton.icon(
+      onPressed: isLaunching ? null : onPressed,
+      icon: icon,
+      label: Text(label),
+      style: FilledButton.styleFrom(
+        backgroundColor: Colors.white.withValues(alpha: 0.18),
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: Colors.white.withValues(alpha: 0.08),
+        disabledForegroundColor: Colors.white.withValues(alpha: 0.55),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      ),
+    );
+  }
+}
+
+class _ClientHeaderPathPill extends StatelessWidget {
+  final String path;
+
+  const _ClientHeaderPathPill({required this.path});
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Row(
+          children: [
+            Icon(
+              Icons.folder_open_rounded,
+              size: 15,
+              color: Colors.white.withValues(alpha: 0.78),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                path,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.88),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchFeedSliverContent extends ConsumerWidget {
   final GameClient client;
   final ClientSearchScopeKey scopeKey;
+  final String query;
+  final bool isDiscoveryMode;
 
-  const _DiscoveryFeedContent({required this.client, required this.scopeKey});
+  const _SearchFeedSliverContent({
+    required this.client,
+    required this.scopeKey,
+    required this.query,
+    required this.isDiscoveryMode,
+  });
+
+  ProviderListenable<AddonFeedState> get _feedProvider => isDiscoveryMode
+      ? discoveryFeedProvider(scopeKey)
+      : searchResultsProvider(scopeKey);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -2493,7 +3143,7 @@ class _DiscoveryFeedContent extends ConsumerWidget {
       appSettingsProvider.select((state) => state.locale.languageCode),
     );
     final shellState = ref.watch(
-      discoveryFeedProvider(scopeKey).select(
+      _feedProvider.select(
         (state) => (
           hasResults: state.hasResults,
           hasError: state.hasError && !state.hasResults,
@@ -2505,111 +3155,85 @@ class _DiscoveryFeedContent extends ConsumerWidget {
     );
 
     if (shellState.hasError) {
-      return _StatusMessage(
-        icon: Icons.cloud_off_rounded,
-        title: l10n.discoveryFeedErrorTitle,
-        message: l10n.discoveryFeedErrorMessage(
-          client.version,
-          _formatError(shellState.error!),
+      return SliverFillRemaining(
+        hasScrollBody: false,
+        child: _StatusMessage(
+          icon: isDiscoveryMode
+              ? Icons.cloud_off_rounded
+              : Icons.error_outline_rounded,
+          title: isDiscoveryMode
+              ? l10n.discoveryFeedErrorTitle
+              : l10n.searchErrorTitle,
+          message: isDiscoveryMode
+              ? l10n.discoveryFeedErrorMessage(
+                  client.version,
+                  _formatError(shellState.error!),
+                )
+              : l10n.searchErrorMessage(_formatError(shellState.error!)),
+          actionLabel: l10n.retryButton,
+          onAction: isDiscoveryMode
+              ? () => ref.read(discoveryFeedProvider(scopeKey).notifier).load()
+              : () => ref
+                    .read(searchResultsProvider(scopeKey).notifier)
+                    .search(query, gameVersion: client.version),
         ),
-        actionLabel: l10n.retryButton,
-        onAction: () =>
-            ref.read(discoveryFeedProvider(scopeKey).notifier).load(),
       );
     }
 
     if (shellState.isInitialLoading) {
-      return _LoadingState(label: l10n.discoveryFeedLoading(client.version));
-    }
-
-    if (!shellState.hasResults) {
-      return _StatusMessage(
-        icon: Icons.travel_explore_rounded,
-        title: l10n.discoveryFeedEmptyTitle,
-        message: l10n.discoveryFeedEmptyMessage(client.version),
-        actionLabel: shellState.canLoadMore
-            ? AppLocalizationsStub.loadMore(locale)
-            : null,
-        onAction: shellState.canLoadMore
-            ? () =>
-                  ref.read(discoveryFeedProvider(scopeKey).notifier).loadMore()
-            : null,
-      );
-    }
-
-    return _VerifiedFeedListSection(
-      feedProvider: discoveryFeedProvider(scopeKey),
-      client: client,
-      showLoadMore: true,
-      onLoadMore: () =>
-          ref.read(discoveryFeedProvider(scopeKey).notifier).loadMore(),
-    );
-  }
-}
-
-class _SearchResultsContent extends ConsumerWidget {
-  final GameClient client;
-  final ClientSearchScopeKey scopeKey;
-  final String query;
-
-  const _SearchResultsContent({
-    required this.client,
-    required this.scopeKey,
-    required this.query,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final l10n = AppLocalizations.of(context)!;
-    final shellState = ref.watch(
-      searchResultsProvider(scopeKey).select(
-        (state) => (
-          hasResults: state.hasResults,
-          hasError: state.hasError && !state.hasResults,
-          isInitialLoading: state.isLoading && !state.hasResults,
-          error: state.hasError ? state.error : null,
+      return SliverFillRemaining(
+        hasScrollBody: false,
+        child: _LoadingState(
+          label: isDiscoveryMode
+              ? l10n.discoveryFeedLoading(client.version)
+              : l10n.searchLoading(query),
         ),
-      ),
-    );
-
-    if (shellState.hasError) {
-      return _StatusMessage(
-        icon: Icons.error_outline_rounded,
-        title: l10n.searchErrorTitle,
-        message: l10n.searchErrorMessage(_formatError(shellState.error!)),
-        actionLabel: l10n.retryButton,
-        onAction: () => ref
-            .read(searchResultsProvider(scopeKey).notifier)
-            .search(query, gameVersion: client.version),
       );
-    }
-
-    if (shellState.isInitialLoading) {
-      return _LoadingState(label: l10n.searchLoading(query));
     }
 
     if (!shellState.hasResults) {
-      return _StatusMessage(
-        icon: Icons.search_off_rounded,
-        title: l10n.searchNoResultsTitle,
-        message: l10n.searchNoResultsMessage(query, client.version),
+      return SliverFillRemaining(
+        hasScrollBody: false,
+        child: _StatusMessage(
+          icon: isDiscoveryMode
+              ? Icons.travel_explore_rounded
+              : Icons.search_off_rounded,
+          title: isDiscoveryMode
+              ? l10n.discoveryFeedEmptyTitle
+              : l10n.searchNoResultsTitle,
+          message: isDiscoveryMode
+              ? l10n.discoveryFeedEmptyMessage(client.version)
+              : l10n.searchNoResultsMessage(query, client.version),
+          actionLabel: isDiscoveryMode && shellState.canLoadMore
+              ? AppLocalizationsStub.loadMore(locale)
+              : null,
+          onAction: isDiscoveryMode && shellState.canLoadMore
+              ? () => ref
+                    .read(discoveryFeedProvider(scopeKey).notifier)
+                    .loadMore()
+              : null,
+        ),
       );
     }
 
-    return _VerifiedFeedListSection(
-      feedProvider: searchResultsProvider(scopeKey),
+    return _VerifiedFeedSliverSection(
+      feedProvider: _feedProvider,
       client: client,
+      showLoadMore: isDiscoveryMode,
+      onLoadMore: isDiscoveryMode
+          ? () => ref.read(discoveryFeedProvider(scopeKey).notifier).loadMore()
+          : null,
     );
   }
 }
 
-class _VerifiedFeedListSection extends ConsumerWidget {
+class _VerifiedFeedSliverSection extends ConsumerWidget {
   final ProviderListenable<AddonFeedState> feedProvider;
   final GameClient client;
   final bool showLoadMore;
   final VoidCallback? onLoadMore;
 
-  const _VerifiedFeedListSection({
+  const _VerifiedFeedSliverSection({
     required this.feedProvider,
     required this.client,
     this.showLoadMore = false,
@@ -2639,38 +3263,42 @@ class _VerifiedFeedListSection extends ConsumerWidget {
       growable: false,
     );
 
-    return Column(
-      children: [
-        Expanded(
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-            addRepaintBoundaries: false,
-            addAutomaticKeepAlives: false,
-            itemCount: items.length,
-            separatorBuilder: (context, index) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              final item = items[index];
-              final itemKey = '${item.providerName}:${item.originalId}';
-              return RepaintBoundary(
-                child: _AnimatedFeedEntry(
-                  key: ValueKey(itemKey),
-                  child: AddonSearchResultTile(
-                    mod: item,
-                    client: client,
-                    localeCode: locale,
-                    installedMatch: installedMatches[index],
-                  ),
-                ),
-              );
-            },
+    final children = <Widget>[
+      for (var index = 0; index < items.length; index++) ...[
+        RepaintBoundary(
+          child: _AnimatedFeedEntry(
+            key: ValueKey(
+              '${items[index].providerName}:${items[index].originalId}',
+            ),
+            child: AddonSearchResultTile(
+              mod: items[index],
+              client: client,
+              localeCode: locale,
+              installedMatch: installedMatches[index],
+            ),
           ),
         ),
+        if (index < items.length - 1) const SizedBox(height: 12),
+      ],
+    ];
+
+    return SliverMainAxisGroup(
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          sliver: SliverList.list(children: children),
+        ),
         if (showLoadMore && onLoadMore != null)
-          _DiscoveryLoadMoreBar(
-            feedProvider: feedProvider,
-            onPressed: onLoadMore!,
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: _DiscoveryLoadMoreBar(
+                feedProvider: feedProvider,
+                onPressed: onLoadMore!,
+              ),
+            ),
           ),
-        const SizedBox(height: 96),
+        const SliverToBoxAdapter(child: SizedBox(height: 96)),
       ],
     );
   }
@@ -2811,7 +3439,7 @@ class AddonSearchResultTile extends ConsumerStatefulWidget {
 class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
   bool _isInstalling = false;
 
-  Future<void> _handleInstall() async {
+  Future<bool> _handleInstall() async {
     final locale = ref.read(appSettingsProvider).locale.languageCode;
     setState(() => _isInstalling = true);
 
@@ -2821,14 +3449,14 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
         localAddonsProvider(widget.client).notifier,
       );
 
-      if (!mounted) return;
+      if (!mounted) return false;
 
       final result = await installAddon(
         addon: widget.mod,
         client: widget.client,
       );
 
-      if (!mounted) return;
+      if (!mounted) return false;
 
       if (result.status == InstallAddonStatus.versionNotFound) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2842,6 +3470,7 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
+        return false;
       } else if (result.status == InstallAddonStatus.alreadyInstalled) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -2851,17 +3480,19 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
             backgroundColor: Theme.of(context).colorScheme.secondary,
           ),
         );
+        return false;
       } else if (result.status == InstallAddonStatus.success) {
         await localAddonsNotifier.refresh();
-        if (!mounted) return;
+        if (!mounted) return false;
         widget.onInstalled?.call(result.installedFolders);
-        if (!mounted) return;
+        if (!mounted) return false;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(AppLocalizationsStub.installSuccess(locale)),
             backgroundColor: Theme.of(context).colorScheme.primary,
           ),
         );
+        return true;
       } else if (result.error != null) {
         throw result.error!;
       }
@@ -2882,9 +3513,250 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
           ),
         );
       }
+      return false;
     } finally {
       if (mounted) setState(() => _isInstalling = false);
     }
+
+    return false;
+  }
+
+  ButtonStyle _addonActionButtonStyle(
+    BuildContext context, {
+    required bool installed,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final baseStyle = FilledButton.styleFrom(
+      minimumSize: const Size(0, 40),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      textStyle: Theme.of(
+        context,
+      ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+    );
+
+    if (!installed) {
+      return baseStyle;
+    }
+
+    return baseStyle.copyWith(
+      backgroundColor: WidgetStateProperty.all(colorScheme.secondaryContainer),
+      foregroundColor: WidgetStateProperty.all(
+        colorScheme.onSecondaryContainer,
+      ),
+      side: WidgetStateProperty.all(
+        BorderSide(color: colorScheme.secondary.withValues(alpha: 0.28)),
+      ),
+      elevation: WidgetStateProperty.all(0),
+    );
+  }
+
+  Widget _buildAddonActionControl(
+    BuildContext context,
+    String locale, {
+    required bool isInstalled,
+    required bool isBusy,
+    VoidCallback? onInstallPressed,
+  }) {
+    if (isInstalled) {
+      return FilledButton.tonalIcon(
+        onPressed: () {},
+        style: _addonActionButtonStyle(context, installed: true),
+        icon: const Icon(Icons.check_circle_rounded, size: 16),
+        label: Text(
+          AppLocalizationsStub.installed(locale),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      );
+    }
+
+    return FilledButton.tonal(
+      onPressed: isBusy ? () {} : onInstallPressed,
+      style: _addonActionButtonStyle(context, installed: false),
+      child: isBusy
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Text(AppLocalizationsStub.install(locale)),
+    );
+  }
+
+  Future<void> _showDetailsDialog() async {
+    final l10n = AppLocalizations.of(context)!;
+    final colorScheme = Theme.of(context).colorScheme;
+    final authorName = widget.mod.author?.trim();
+    final summary = widget.mod.summary.trim().isEmpty
+        ? l10n.addonNoDescription
+        : widget.mod.summary;
+    final screenshotUrls = widget.mod.screenshotUrls
+        .where((url) => url.trim().isNotEmpty)
+        .toList(growable: false);
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        final size = MediaQuery.sizeOf(dialogContext);
+        final maxWidth = size.width > 920 ? 760.0 : size.width * 0.92;
+        final maxHeight = size.height > 760 ? 620.0 : size.height * 0.86;
+
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
+          backgroundColor: colorScheme.surface,
+          surfaceTintColor: colorScheme.surfaceTint,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: maxWidth,
+              maxHeight: maxHeight,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _AddonThumbnail(
+                        url: widget.mod.thumbnailUrl,
+                        size: 92,
+                        borderRadius: 20,
+                      ),
+                      const SizedBox(width: 18),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.mod.name,
+                              style: Theme.of(context).textTheme.headlineSmall
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.4,
+                                  ),
+                            ),
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                _ProviderBadge(
+                                  providerName: widget.mod.providerName,
+                                ),
+                                _AddonMetadataChip(
+                                  icon: Icons.sell_outlined,
+                                  label: l10n.addonVersionLabel(
+                                    widget.mod.version,
+                                  ),
+                                ),
+                                if (authorName != null && authorName.isNotEmpty)
+                                  _AddonMetadataChip(
+                                    icon: Icons.person_outline_rounded,
+                                    label: l10n.addonAuthorLabel(
+                                      '${widget.mod.providerName == GitHubProvider.staticProviderName ? '@' : ''}$authorName',
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      IconButton(
+                        tooltip: l10n.addonDetailsClose,
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  if (screenshotUrls.isNotEmpty) ...[
+                    Text(
+                      l10n.addonDetailsGalleryTitle,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 108,
+                      child: _AddonScreenshotGallery(urls: screenshotUrls),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+                  Text(
+                    l10n.addonDetailsDescriptionTitle,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Text(
+                        summary,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          height: 1.45,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        child: Text(l10n.addonDetailsClose),
+                      ),
+                      const SizedBox(width: 12),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(minWidth: 132),
+                        child: widget.installedMatch.isInstalled
+                            ? _buildInstalledBadge(
+                                context,
+                                widget.localeCode,
+                              )
+                            : _buildAddonActionControl(
+                                context,
+                                widget.localeCode,
+                                isInstalled: false,
+                                isBusy: _isInstalling,
+                                onInstallPressed: () async {
+                                  final didInstall = await _handleInstall();
+                                  if (didInstall && dialogContext.mounted) {
+                                    Navigator.of(dialogContext).pop();
+                                  }
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildInstalledBadge(BuildContext context, String locale) {
+    return _buildAddonActionControl(
+      context,
+      locale,
+      isInstalled: true,
+      isBusy: false,
+    );
   }
 
   @override
@@ -2905,6 +3777,7 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
 
     return Card(
       elevation: 0,
+      clipBehavior: Clip.antiAlias,
       color: colorScheme.surfaceContainerLow,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
@@ -2913,123 +3786,180 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
           width: 1,
         ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Row(
-          children: [
-            _AddonThumbnail(url: widget.mod.thumbnailUrl),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          widget.mod.name,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _ProviderBadge(providerName: widget.mod.providerName),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      if (authorLabel != null)
-                        Expanded(
-                          child: Text(
-                            authorLabel,
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.secondary,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      const SizedBox(width: 8),
-                      Text(
-                        l10n.addonVersionLabel(widget.mod.version),
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: colorScheme.outline,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    summary,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 16),
-            if (installedMatch.isInstalled)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: colorScheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: colorScheme.secondary.withValues(alpha: 0.28),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+      child: InkWell(
+        onTap: _showDetailsDialog,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _AddonThumbnail(url: widget.mod.thumbnailUrl),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      Icons.check_circle_rounded,
-                      size: 18,
-                      color: colorScheme.onSecondaryContainer,
-                    ),
-                    const SizedBox(width: 8),
                     Text(
-                      AppLocalizationsStub.installed(locale),
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: colorScheme.onSecondaryContainer,
+                      widget.mod.name,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (authorLabel != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        authorLabel,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: colorScheme.secondary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    const SizedBox(height: 6),
+                    Text(
+                      summary,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
-              )
-            else
-              FilledButton.tonal(
-                onPressed: _isInstalling ? null : _handleInstall,
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  minimumSize: const Size(0, 40),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: _isInstalling
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(AppLocalizationsStub.install(locale)),
               ),
-          ],
+              const SizedBox(width: 16),
+              ConstrainedBox(
+                constraints: const BoxConstraints(
+                  minWidth: 126,
+                  maxWidth: 146,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: _ProviderBadge(
+                        providerName: widget.mod.providerName,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      l10n.addonVersionLabel(widget.mod.version),
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: colorScheme.outline,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      child: installedMatch.isInstalled
+                          ? _buildInstalledBadge(context, locale)
+                          : _buildAddonActionControl(
+                              context,
+                              locale,
+                              isInstalled: false,
+                              isBusy: _isInstalling,
+                              onInstallPressed: () {
+                                _handleInstall();
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+class _AddonMetadataChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _AddonMetadataChip({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: colorScheme.primary),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: colorScheme.onSurface,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AddonScreenshotGallery extends StatelessWidget {
+  final List<String> urls;
+
+  const _AddonScreenshotGallery({required this.urls});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return ListView.separated(
+      scrollDirection: Axis.horizontal,
+      itemCount: urls.length,
+      separatorBuilder: (context, index) => const SizedBox(width: 12),
+      itemBuilder: (context, index) {
+        final url = urls[index];
+        return AspectRatio(
+          aspectRatio: 1.72,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHigh,
+              ),
+              child: Image.network(
+                url,
+                fit: BoxFit.cover,
+                filterQuality: FilterQuality.low,
+                errorBuilder: (context, error, stackTrace) => Center(
+                  child: Icon(
+                    Icons.image_not_supported_outlined,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -3155,31 +4085,34 @@ class _ProviderBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final isCF = providerName == 'CurseForge';
 
-    Color bgColor = Colors.grey.shade200;
-    Color textColor = Colors.black87;
-    Color borderColor = Colors.grey.shade400;
+    Color bgColor = colorScheme.surfaceContainerHighest;
+    Color textColor = colorScheme.onSurfaceVariant;
+    Color borderColor = colorScheme.outlineVariant.withValues(alpha: 0.42);
 
     if (isCF) {
-      bgColor = Colors.deepPurple.shade100;
-      textColor = Colors.deepPurple.shade900;
-      borderColor = Colors.deepPurple.shade200;
+      bgColor = colorScheme.tertiaryContainer.withValues(alpha: 0.86);
+      textColor = colorScheme.onTertiaryContainer;
+      borderColor = colorScheme.tertiary.withValues(alpha: 0.28);
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(color: borderColor, width: 1),
       ),
       child: Text(
         providerName,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
           color: textColor,
+          fontWeight: FontWeight.w700,
+          height: 1.1,
         ),
       ),
     );
@@ -3735,98 +4668,102 @@ class _AppearanceSettingsView extends ConsumerWidget {
       ),
     ];
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
-      children: [
-        _SettingsSectionHeader(
-          title: l10n.settingsAppearanceTitle,
-          subtitle: l10n.settingsAppearanceSubtitle,
-        ),
-        const SizedBox(height: 20),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final isWide = constraints.maxWidth >= 960;
-            final settingsColumn = Column(
-              children: [
-                _SettingsSurfaceCard(
-                  title: l10n.settingsThemeModeTitle,
-                  subtitle: l10n.settingsThemeModeSubtitle,
-                  child: SegmentedButton<ThemeMode>(
-                    showSelectedIcon: false,
-                    segments: [
-                      ButtonSegment<ThemeMode>(
-                        value: ThemeMode.light,
-                        icon: const Icon(Icons.light_mode_rounded),
-                        label: Text(l10n.themeLight),
-                      ),
-                      ButtonSegment<ThemeMode>(
-                        value: ThemeMode.system,
-                        icon: const Icon(Icons.brightness_auto_rounded),
-                        label: Text(l10n.themeSystem),
-                      ),
-                      ButtonSegment<ThemeMode>(
-                        value: ThemeMode.dark,
-                        icon: const Icon(Icons.dark_mode_rounded),
-                        label: Text(l10n.themeDark),
-                      ),
-                    ],
-                    selected: <ThemeMode>{settings.themeMode},
-                    onSelectionChanged: (selection) {
-                      if (selection.isNotEmpty) {
-                        notifier.setThemeMode(selection.first);
-                      }
-                    },
-                  ),
-                ),
-                const SizedBox(height: 16),
-                _SettingsSurfaceCard(
-                  title: l10n.settingsAccentTitle,
-                  subtitle: l10n.settingsAccentSubtitle,
-                  child: Wrap(
-                    spacing: 14,
-                    runSpacing: 14,
-                    children: [
-                      for (final palette in palettes)
-                        _AccentPaletteTile(
-                          option: palette,
-                          selected:
-                              settings.seedColor.toARGB32() ==
-                              palette.color.toARGB32(),
-                          onTap: () => notifier.setSeedColor(palette.color),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            );
-
-            final previewCard = _SettingsSurfaceCard(
-              title: l10n.settingsPreviewTitle,
-              subtitle: l10n.settingsPreviewSubtitle,
-              child: _ThemePreviewSurface(settings: settings),
-            );
-
-            if (!isWide) {
-              return Column(
+    return _DesktopScrollHost(
+      builder: (context, controller, physics) => ListView(
+        controller: controller,
+        physics: physics,
+        padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
+        children: [
+          _SettingsSectionHeader(
+            title: l10n.settingsAppearanceTitle,
+            subtitle: l10n.settingsAppearanceSubtitle,
+          ),
+          const SizedBox(height: 20),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth >= 960;
+              final settingsColumn = Column(
                 children: [
-                  settingsColumn,
+                  _SettingsSurfaceCard(
+                    title: l10n.settingsThemeModeTitle,
+                    subtitle: l10n.settingsThemeModeSubtitle,
+                    child: SegmentedButton<ThemeMode>(
+                      showSelectedIcon: false,
+                      segments: [
+                        ButtonSegment<ThemeMode>(
+                          value: ThemeMode.light,
+                          icon: const Icon(Icons.light_mode_rounded),
+                          label: Text(l10n.themeLight),
+                        ),
+                        ButtonSegment<ThemeMode>(
+                          value: ThemeMode.system,
+                          icon: const Icon(Icons.brightness_auto_rounded),
+                          label: Text(l10n.themeSystem),
+                        ),
+                        ButtonSegment<ThemeMode>(
+                          value: ThemeMode.dark,
+                          icon: const Icon(Icons.dark_mode_rounded),
+                          label: Text(l10n.themeDark),
+                        ),
+                      ],
+                      selected: <ThemeMode>{settings.themeMode},
+                      onSelectionChanged: (selection) {
+                        if (selection.isNotEmpty) {
+                          notifier.setThemeMode(selection.first);
+                        }
+                      },
+                    ),
+                  ),
                   const SizedBox(height: 16),
-                  previewCard,
+                  _SettingsSurfaceCard(
+                    title: l10n.settingsAccentTitle,
+                    subtitle: l10n.settingsAccentSubtitle,
+                    child: Wrap(
+                      spacing: 14,
+                      runSpacing: 14,
+                      children: [
+                        for (final palette in palettes)
+                          _AccentPaletteTile(
+                            option: palette,
+                            selected:
+                                settings.seedColor.toARGB32() ==
+                                palette.color.toARGB32(),
+                            onTap: () => notifier.setSeedColor(palette.color),
+                          ),
+                      ],
+                    ),
+                  ),
                 ],
               );
-            }
 
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(flex: 11, child: settingsColumn),
-                const SizedBox(width: 16),
-                Expanded(flex: 9, child: previewCard),
-              ],
-            );
-          },
-        ),
-      ],
+              final previewCard = _SettingsSurfaceCard(
+                title: l10n.settingsPreviewTitle,
+                subtitle: l10n.settingsPreviewSubtitle,
+                child: _ThemePreviewSurface(settings: settings),
+              );
+
+              if (!isWide) {
+                return Column(
+                  children: [
+                    settingsColumn,
+                    const SizedBox(height: 16),
+                    previewCard,
+                  ],
+                );
+              }
+
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 11, child: settingsColumn),
+                  const SizedBox(width: 16),
+                  Expanded(flex: 9, child: previewCard),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 }
@@ -3840,79 +4777,87 @@ class _ApplicationSettingsView extends ConsumerWidget {
     final notifier = ref.read(appSettingsProvider.notifier);
     final l10n = AppLocalizations.of(context)!;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
-      children: [
-        _SettingsSectionHeader(
-          title: l10n.settingsApplicationTitle,
-          subtitle: l10n.settingsApplicationSubtitle,
-        ),
-        const SizedBox(height: 20),
-        _SettingsSurfaceCard(
-          title: l10n.settingsLanguageTitle,
-          subtitle: l10n.settingsLanguageSubtitle,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SegmentedButton<String>(
-                showSelectedIcon: false,
-                segments: [
-                  ButtonSegment<String>(
-                    value: 'ru',
-                    icon: const Icon(Icons.translate_rounded),
-                    label: Text(l10n.settingsLanguageRussian),
-                  ),
-                  ButtonSegment<String>(
-                    value: 'en',
-                    icon: const Icon(Icons.language_rounded),
-                    label: Text(l10n.settingsLanguageEnglish),
-                  ),
-                ],
-                selected: <String>{settings.locale.languageCode},
-                onSelectionChanged: (selection) {
-                  if (selection.isNotEmpty) {
-                    notifier.setLocale(Locale(selection.first));
-                  }
-                },
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primaryContainer,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.g_translate_rounded,
-                        color: Theme.of(context).colorScheme.onPrimaryContainer,
-                      ),
+    return _DesktopScrollHost(
+      builder: (context, controller, physics) => ListView(
+        controller: controller,
+        physics: physics,
+        padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
+        children: [
+          _SettingsSectionHeader(
+            title: l10n.settingsApplicationTitle,
+            subtitle: l10n.settingsApplicationSubtitle,
+          ),
+          const SizedBox(height: 20),
+          _SettingsSurfaceCard(
+            title: l10n.settingsLanguageTitle,
+            subtitle: l10n.settingsLanguageSubtitle,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: [
+                    ButtonSegment<String>(
+                      value: 'ru',
+                      icon: const Icon(Icons.translate_rounded),
+                      label: Text(l10n.settingsLanguageRussian),
                     ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Text(
-                        settings.locale.languageCode == 'ru'
-                            ? l10n.settingsLanguageRussian
-                            : l10n.settingsLanguageEnglish,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w700),
-                      ),
+                    ButtonSegment<String>(
+                      value: 'en',
+                      icon: const Icon(Icons.language_rounded),
+                      label: Text(l10n.settingsLanguageEnglish),
                     ),
                   ],
+                  selected: <String>{settings.locale.languageCode},
+                  onSelectionChanged: (selection) {
+                    if (selection.isNotEmpty) {
+                      notifier.setLocale(Locale(selection.first));
+                    }
+                  },
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primaryContainer,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.g_translate_rounded,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Text(
+                          settings.locale.languageCode == 'ru'
+                              ? l10n.settingsLanguageRussian
+                              : l10n.settingsLanguageEnglish,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -4026,149 +4971,156 @@ class _AboutSettingsView extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final colorScheme = Theme.of(context).colorScheme;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
-      children: [
-        _SettingsSectionHeader(
-          title: l10n.settingsAboutTitle,
-          subtitle: l10n.settingsAboutSubtitle,
-        ),
-        const SizedBox(height: 20),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final isWide = constraints.maxWidth >= 960;
-            final heroCard = Container(
-              padding: const EdgeInsets.all(28),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    colorScheme.primaryContainer,
-                    colorScheme.secondaryContainer,
-                    colorScheme.tertiaryContainer,
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(32),
-                border: Border.all(
-                  color: colorScheme.outlineVariant.withValues(alpha: 0.35),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const AppLogoWidget(size: 108),
-                  const SizedBox(height: 24),
-                  Text(
-                    l10n.appTitle,
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.7,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    l10n.aboutTagline,
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      _SettingsInfoPill(
-                        icon: Icons.sell_outlined,
-                        label: '${l10n.aboutVersionTitle}: $kAppVersionLabel',
-                      ),
-                      _SettingsInfoPill(
-                        icon: Icons.person_outline_rounded,
-                        label: '${l10n.aboutDeveloperTitle}: Qurie',
-                      ),
+    return _DesktopScrollHost(
+      builder: (context, controller, physics) => ListView(
+        controller: controller,
+        physics: physics,
+        padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
+        children: [
+          _SettingsSectionHeader(
+            title: l10n.settingsAboutTitle,
+            subtitle: l10n.settingsAboutSubtitle,
+          ),
+          const SizedBox(height: 20),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth >= 960;
+              final heroCard = Container(
+                padding: const EdgeInsets.all(28),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      colorScheme.primaryContainer,
+                      colorScheme.secondaryContainer,
+                      colorScheme.tertiaryContainer,
                     ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                ],
-              ),
-            );
-
-            final supportCard = _SettingsSurfaceCard(
-              title: l10n.aboutSupportTitle,
-              subtitle: l10n.aboutSupportSubtitle,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(32),
+                  border: Border.all(
+                    color: colorScheme.outlineVariant.withValues(alpha: 0.35),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const AppLogoWidget(size: 108),
+                    const SizedBox(height: 24),
+                    Text(
+                      l10n.appTitle,
+                      style: Theme.of(context).textTheme.headlineMedium
+                          ?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.7,
+                          ),
                     ),
-                    child: Row(
+                    const SizedBox(height: 8),
+                    Text(
+                      l10n.aboutTagline,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
                       children: [
-                        Container(
-                          width: 52,
-                          height: 52,
-                          decoration: BoxDecoration(
-                            color: colorScheme.primaryContainer,
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                          child: Icon(
-                            Icons.coffee_rounded,
-                            color: colorScheme.onPrimaryContainer,
-                          ),
+                        _SettingsInfoPill(
+                          icon: Icons.sell_outlined,
+                          label: '${l10n.aboutVersionTitle}: $kAppVersionLabel',
                         ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Text(
-                            l10n.aboutSupportSubtitle,
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(color: colorScheme.onSurfaceVariant),
-                          ),
+                        _SettingsInfoPill(
+                          icon: Icons.person_outline_rounded,
+                          label: '${l10n.aboutDeveloperTitle}: Qurie',
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 18),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      FilledButton.icon(
-                        onPressed: () =>
-                            _openExternalLink(context, kProjectGitHubUri),
-                        icon: const Icon(Icons.code_rounded),
-                        label: Text(l10n.aboutOpenGitHub),
-                      ),
-                      FilledButton.tonalIcon(
-                        onPressed: () =>
-                            _openExternalLink(context, kProjectBoostyUri),
-                        icon: const Icon(Icons.coffee_rounded),
-                        label: Text(l10n.aboutOpenBoosty),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-
-            if (!isWide) {
-              return Column(
-                children: [heroCard, const SizedBox(height: 16), supportCard],
+                  ],
+                ),
               );
-            }
 
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(flex: 11, child: heroCard),
-                const SizedBox(width: 16),
-                Expanded(flex: 9, child: supportCard),
-              ],
-            );
-          },
-        ),
-      ],
+              final supportCard = _SettingsSurfaceCard(
+                title: l10n.aboutSupportTitle,
+                subtitle: l10n.aboutSupportSubtitle,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 52,
+                            height: 52,
+                            decoration: BoxDecoration(
+                              color: colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            child: Icon(
+                              Icons.coffee_rounded,
+                              color: colorScheme.onPrimaryContainer,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Text(
+                              l10n.aboutSupportSubtitle,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: () =>
+                              _openExternalLink(context, kProjectGitHubUri),
+                          icon: const Icon(Icons.code_rounded),
+                          label: Text(l10n.aboutOpenGitHub),
+                        ),
+                        FilledButton.tonalIcon(
+                          onPressed: () =>
+                              _openExternalLink(context, kProjectBoostyUri),
+                          icon: const Icon(Icons.coffee_rounded),
+                          label: Text(l10n.aboutOpenBoosty),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+
+              if (!isWide) {
+                return Column(
+                  children: [heroCard, const SizedBox(height: 16), supportCard],
+                );
+              }
+
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 11, child: heroCard),
+                  const SizedBox(width: 16),
+                  Expanded(flex: 9, child: supportCard),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 }

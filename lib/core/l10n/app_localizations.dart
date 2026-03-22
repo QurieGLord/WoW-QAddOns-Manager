@@ -410,6 +410,30 @@ abstract class AppLocalizations {
   /// **'Client Details'**
   String get clientDetailsTitle;
 
+  /// No description provided for @clientLaunchAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Launch game'**
+  String get clientLaunchAction;
+
+  /// No description provided for @clientLaunchMissingExecutable.
+  ///
+  /// In en, this message translates to:
+  /// **'The game executable couldn\'t be found for this client.'**
+  String get clientLaunchMissingExecutable;
+
+  /// No description provided for @clientLaunchInvalidPath.
+  ///
+  /// In en, this message translates to:
+  /// **'The client folder is unavailable or no longer exists.'**
+  String get clientLaunchInvalidPath;
+
+  /// No description provided for @clientLaunchFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t launch the game client.'**
+  String get clientLaunchFailed;
+
   /// No description provided for @clientDetailsLoadingAddons.
   ///
   /// In en, this message translates to:
@@ -541,6 +565,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No description available'**
   String get addonNoDescription;
+
+  /// No description provided for @addonDetailsGalleryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Screenshots'**
+  String get addonDetailsGalleryTitle;
+
+  /// No description provided for @addonDetailsDescriptionTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Description'**
+  String get addonDetailsDescriptionTitle;
+
+  /// No description provided for @addonDetailsClose.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get addonDetailsClose;
 }
 
 class _AppLocalizationsDelegate

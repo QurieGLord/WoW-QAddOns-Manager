@@ -4,6 +4,7 @@ class AddonItem {
   final String summary;
   final String? author;
   final String? thumbnailUrl;
+  final List<String> screenshotUrls;
   final String providerName;
   final dynamic originalId; // modId for CF, full_name for GH
   final String? sourceSlug;
@@ -18,6 +19,7 @@ class AddonItem {
     required this.summary,
     this.author,
     this.thumbnailUrl,
+    this.screenshotUrls = const <String>[],
     required this.providerName,
     required this.originalId,
     this.sourceSlug,
@@ -40,6 +42,7 @@ class AddonItem {
     'summary': summary,
     'author': author,
     'thumbnailUrl': thumbnailUrl,
+    'screenshotUrls': screenshotUrls,
     'providerName': providerName,
     'originalId': originalId,
     'sourceSlug': sourceSlug,
@@ -56,6 +59,10 @@ class AddonItem {
       summary: json['summary'] as String,
       author: json['author'] as String?,
       thumbnailUrl: json['thumbnailUrl'] as String?,
+      screenshotUrls:
+          (json['screenshotUrls'] as List<dynamic>? ?? const <dynamic>[])
+              .whereType<String>()
+              .toList(growable: false),
       providerName: json['providerName'] as String,
       originalId: json['originalId'],
       sourceSlug: json['sourceSlug'] as String?,
@@ -75,6 +82,7 @@ class AddonItem {
     String? summary,
     String? author,
     String? thumbnailUrl,
+    List<String>? screenshotUrls,
     String? providerName,
     dynamic originalId,
     String? sourceSlug,
@@ -89,6 +97,7 @@ class AddonItem {
       summary: summary ?? this.summary,
       author: author ?? this.author,
       thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
+      screenshotUrls: screenshotUrls ?? this.screenshotUrls,
       providerName: providerName ?? this.providerName,
       originalId: originalId ?? this.originalId,
       sourceSlug: sourceSlug ?? this.sourceSlug,

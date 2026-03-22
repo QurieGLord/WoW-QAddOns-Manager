@@ -54,6 +54,11 @@ class DefaultAddonService implements AddonService {
   }
 
   @override
+  Future<AddonItem?> verifyCandidate(AddonItem item, String gameVersion) {
+    return _searchService.verifyCandidate(item, gameVersion);
+  }
+
+  @override
   AddonInstalledMatch matchInstalledAddon(
     AddonItem item,
     List<InstalledAddonGroup> installedGroups,

@@ -107,14 +107,22 @@ class InstallAddonUseCase {
     required AddonItem addon,
     required GameClient client,
   }) async {
-    final info = await _addonService.getDownloadInfo(addon, client.version);
-    if (info == null) {
+    final verifiedAddon = await _addonService.verifyCandidate(
+      addon,
+      client.version,
+    );
+    if (verifiedAddon == null || !verifiedAddon.hasVerifiedPayload) {
       return const InstallAddonResult.versionNotFound();
     }
 
+    final normalizedAddon = _normalizeInstalledAddonVersion(
+      verifiedAddon,
+      verifiedAddon.verifiedFileName!,
+    );
+
     final installedGroups = await _loadLocalAddonsUseCase(client);
     final duplicateMatch = _addonService.matchInstalledAddon(
-      addon,
+      normalizedAddon,
       installedGroups,
     );
     if (duplicateMatch.isInstalled) {
@@ -123,13 +131,13 @@ class InstallAddonUseCase {
 
     try {
       final result = await _fileSystemService.installAddonDownload(
-        info.url,
-        info.fileName,
+        normalizedAddon.verifiedDownloadUrl!,
+        normalizedAddon.verifiedFileName!,
         client,
       );
       await _registryService.registerInstallation(
         client,
-        addon: addon,
+        addon: normalizedAddon,
         installedFolders: result.installedFolders,
       );
       return InstallAddonResult.success(result.installedFolders);
@@ -139,6 +147,29 @@ class InstallAddonUseCase {
       }
       return InstallAddonResult.failure(error);
     }
+  }
+
+  AddonItem _normalizeInstalledAddonVersion(AddonItem addon, String fileName) {
+    final extractedVersion = RegExp(
+      r'v?\d+(?:\.\d+){1,3}',
+      caseSensitive: false,
+    ).firstMatch(fileName)?.group(0);
+    if (extractedVersion == null) {
+      return addon;
+    }
+
+    final currentVersion = addon.version.trim();
+    final isPlaceholderVersion =
+        currentVersion.isEmpty ||
+        currentVersion.toLowerCase() == 'n/a' ||
+        currentVersion.toLowerCase() == 'latest' ||
+        currentVersion.toLowerCase() == 'main' ||
+        currentVersion.toLowerCase() == 'master';
+    if (!isPlaceholderVersion) {
+      return addon;
+    }
+
+    return addon.copyWith(version: extractedVersion);
   }
 }
 

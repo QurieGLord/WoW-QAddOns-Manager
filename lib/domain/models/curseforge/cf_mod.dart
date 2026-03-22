@@ -3,16 +3,20 @@ import 'package:wow_qaddons_manager/domain/models/curseforge/cf_file.dart';
 class CfMod {
   final int id;
   final String name;
+  final String slug;
   final String summary;
   final CfLogo? logo;
+  final List<String> screenshotUrls;
   final List<CfAuthor> authors;
   final List<CfFile> latestFiles;
 
   CfMod({
     required this.id,
     required this.name,
+    required this.slug,
     required this.summary,
     this.logo,
+    this.screenshotUrls = const <String>[],
     this.authors = const [],
     this.latestFiles = const [],
   });
@@ -39,20 +43,32 @@ class CfMod {
     return CfMod(
       id: _readInt(json['id']),
       name: _readString(json['name']) ?? 'Unknown CurseForge mod',
+      slug: _readString(json['slug']) ?? '',
       summary: _readString(json['summary']) ?? 'No description available',
-      logo: json['logo'] is Map ? CfLogo.fromJson(Map<String, dynamic>.from(json['logo'] as Map)) : null,
-      authors: _readObjectList(json['authors']).map(CfAuthor.fromJson).toList(growable: false),
-      latestFiles: _readObjectList(json['latestFiles']).map(CfFile.fromJson).toList(growable: false),
+      logo: json['logo'] is Map
+          ? CfLogo.fromJson(Map<String, dynamic>.from(json['logo'] as Map))
+          : null,
+      screenshotUrls: _readScreenshotUrls(json['screenshots']),
+      authors: _readObjectList(
+        json['authors'],
+      ).map(CfAuthor.fromJson).toList(growable: false),
+      latestFiles: _readObjectList(
+        json['latestFiles'],
+      ).map(CfFile.fromJson).toList(growable: false),
     );
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
     'name': name,
+    'slug': slug,
     'summary': summary,
     'logo': logo?.toJson(),
+    'screenshots': screenshotUrls,
     'authors': authors.map((author) => author.toJson()).toList(growable: false),
-    'latestFiles': latestFiles.map((file) => file.toJson()).toList(growable: false),
+    'latestFiles': latestFiles
+        .map((file) => file.toJson())
+        .toList(growable: false),
   };
 
   static int _readInt(Object? value) {
@@ -80,7 +96,20 @@ class CfMod {
       return const <Map<String, dynamic>>[];
     }
 
-    return value.whereType<Map>().map((entry) => Map<String, dynamic>.from(entry)).toList(growable: false);
+    return value
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList(growable: false);
+  }
+
+  static List<String> _readScreenshotUrls(Object? value) {
+    return _readObjectList(value)
+        .map(
+          (entry) =>
+              _readString(entry['url']) ?? _readString(entry['thumbnailUrl']),
+        )
+        .whereType<String>()
+        .toList(growable: false);
   }
 }
 
@@ -95,10 +124,7 @@ class CfAuthor {
     name: CfMod._readString(json['name']) ?? 'Unknown',
   );
 
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'id': id,
-    'name': name,
-  };
+  Map<String, dynamic> toJson() => <String, dynamic>{'id': id, 'name': name};
 }
 
 class CfLogo {
@@ -106,9 +132,8 @@ class CfLogo {
 
   CfLogo({this.thumbnailUrl});
 
-  factory CfLogo.fromJson(Map<String, dynamic> json) => CfLogo(
-    thumbnailUrl: CfMod._readString(json['thumbnailUrl']),
-  );
+  factory CfLogo.fromJson(Map<String, dynamic> json) =>
+      CfLogo(thumbnailUrl: CfMod._readString(json['thumbnailUrl']));
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'thumbnailUrl': thumbnailUrl,

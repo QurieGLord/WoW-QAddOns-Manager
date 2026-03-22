@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="tww-bronze" x1="256" y1="140" x2="256" y2="394" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF0D4"/>
+      <stop offset=".62" stop-color="#D29A4F"/>
+      <stop offset="1" stop-color="#8A5E2D"/>
+    </linearGradient>
+    <linearGradient id="tww-amber" x1="230" y1="188" x2="278" y2="332" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5C56A"/>
+      <stop offset=".58" stop-color="#D29A4F"/>
+      <stop offset="1" stop-color="#9A6B2C"/>
+    </linearGradient>
+    <linearGradient id="tww-abyss" x1="256" y1="170" x2="256" y2="356" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3F5F9E"/>
+      <stop offset=".56" stop-color="#274D95"/>
+      <stop offset="1" stop-color="#13233F"/>
+    </linearGradient>
+    <linearGradient id="tww-ivory" x1="196" y1="182" x2="292" y2="338" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FCF6EB"/>
+      <stop offset=".6" stop-color="#F6F0E4"/>
+      <stop offset="1" stop-color="#D4C8B7"/>
+    </linearGradient>
+  </defs>
+  <rect x="84" y="84" width="344" height="344" rx="92" stroke="#E8D6B2" stroke-width="18"/>
+  <path d="M214 164C181 178 157 205 146 242C136 279 142 316 163 348C177 368 195 384 220 394L236 360C218 351 205 339 196 321C185 299 184 274 191 248C197 223 211 202 234 188L214 164Z" fill="url(#tww-ivory)"/>
+  <path d="M224 188C205 198 192 216 186 241C180 265 182 288 194 308C201 322 210 334 224 344L236 324C226 317 218 307 214 294C207 277 208 259 214 242C219 225 229 210 242 198L224 188Z" fill="url(#tww-abyss)" opacity=".92"/>
+  <path d="M298 164C331 178 355 205 366 242C376 279 370 316 349 348C335 368 317 384 292 394L276 360C294 351 307 339 316 321C327 299 328 274 321 248C315 223 301 202 278 188L298 164Z" fill="url(#tww-ivory)"/>
+  <path d="M288 188C307 198 320 216 326 241C332 265 330 288 318 308C311 322 302 334 288 344L276 324C286 317 294 307 298 294C305 277 304 259 298 242C293 225 283 210 270 198L288 188Z" fill="url(#tww-abyss)" opacity=".92"/>
+  <path d="M206 178L224 150L244 166L256 138L268 166L288 150L306 178L288 200C278 192 267 188 256 188C245 188 234 192 224 200L206 178Z" fill="url(#tww-bronze)"/>
+  <path d="M232 194C239 184 247 178 256 178C265 178 273 184 280 194C288 205 292 220 291 238C287 274 275 311 256 348C237 311 225 274 221 238C220 220 224 205 232 194Z" fill="#131926"/>
+  <path d="M256 194L280 236L256 292L232 236L256 194Z" fill="url(#tww-amber)"/>
+  <path d="M246 212L256 198L266 212L272 244L256 276L240 244L246 212Z" fill="url(#tww-abyss)"/>
+  <path d="M218 314L232 298L242 314L228 330L218 314Z" fill="url(#tww-abyss)"/>
+  <path d="M294 314L280 298L270 314L284 330L294 314Z" fill="url(#tww-abyss)"/>
+  <path d="M224 320C236 334 246 348 256 370C266 348 276 334 288 320L300 346C288 366 274 382 256 394C238 382 224 366 212 346L224 320Z" fill="url(#tww-bronze)"/>
+  <path d="M236 328C244 339 251 352 256 364C261 352 268 339 276 328L282 346C274 360 265 372 256 382C247 372 238 360 230 346L236 328Z" fill="url(#tww-amber)"/>
+  <path d="M220 208C231 198 243 193 256 193C269 193 281 198 292 208" stroke="#D09A51" stroke-width="8" stroke-linecap="round"/>
+  <path d="M194 204C178 226 171 250 171 275C171 297 180 318 197 336" stroke="#3B66B2" stroke-width="8" stroke-linecap="round" opacity=".72"/>
+  <path d="M318 204C334 226 341 250 341 275C341 297 332 318 315 336" stroke="#3B66B2" stroke-width="8" stroke-linecap="round" opacity=".72"/>
+</svg>

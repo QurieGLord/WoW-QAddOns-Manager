@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:collection';
 
+import 'package:dio/dio.dart';
 import 'package:wow_qaddons_manager/core/services/provider_request_context.dart';
 import 'package:wow_qaddons_manager/core/services/search_telemetry_service.dart';
 import 'package:wow_qaddons_manager/core/utils/wow_version_profile.dart';
@@ -14,6 +16,9 @@ class SearchSessionController {
   static const int discoveryVerificationConcurrency = 3;
   static const int slowProviderInitialDiscoveryBudget = 4;
   static const Duration searchDebounce = Duration(milliseconds: 280);
+  static const Duration initialDiscoveryVerificationTimeout = Duration(
+    seconds: 5,
+  );
 
   final SearchRepository _searchRepository;
   final VerifiedAddonResolver _verifiedResolver;
@@ -182,6 +187,7 @@ class SearchSessionController {
               candidatePlan.deferredCandidates.isNotEmpty ||
               !allowFallback ||
               candidates.length > limit,
+          verificationTimeout: initialDiscoveryVerificationTimeout,
         );
       } catch (error, stackTrace) {
         sessionError = error;
@@ -236,6 +242,7 @@ class SearchSessionController {
     required ProviderRequestContext requestContext,
     required Stopwatch sessionStopwatch,
     required bool loadMoreAvailableHint,
+    Duration? verificationTimeout,
   }) async {
     final verifiedByKey = <String, AddonItem>{};
     final rankByKey = <String, int>{
@@ -277,6 +284,7 @@ class SearchSessionController {
       loadingPhase: AddonFeedLoadingPhase.initial,
       sessionStopwatch: sessionStopwatch,
       canLoadMore: loadMoreAvailableHint,
+      verificationTimeout: verificationTimeout,
     );
 
     checkedCandidates = primaryProgress.checkedCandidates;
@@ -313,6 +321,7 @@ class SearchSessionController {
         loadingPhase: AddonFeedLoadingPhase.paginating,
         sessionStopwatch: sessionStopwatch,
         canLoadMore: true,
+        verificationTimeout: null,
       );
 
       checkedCandidates = deferredProgress.checkedCandidates;
@@ -385,6 +394,7 @@ class SearchSessionController {
           loadingPhase: AddonFeedLoadingPhase.paginating,
           sessionStopwatch: sessionStopwatch,
           canLoadMore: true,
+          verificationTimeout: null,
         );
 
         checkedCandidates = fallbackProgress.checkedCandidates;
@@ -427,6 +437,7 @@ class SearchSessionController {
     required AddonFeedLoadingPhase loadingPhase,
     required Stopwatch sessionStopwatch,
     required bool canLoadMore,
+    required Duration? verificationTimeout,
   }) async {
     if (candidates.isEmpty) {
       return _VerificationProgress(
@@ -436,52 +447,57 @@ class SearchSessionController {
       );
     }
 
-    for (
-      var chunkStart = 0;
-      chunkStart < candidates.length && verifiedByKey.length < verifiedLimit;
-      chunkStart += concurrency
-    ) {
-      if (requestContext.isCancelled) {
-        break;
+    final orderedCandidates = loadingPhase == AddonFeedLoadingPhase.initial
+        ? _interleaveDiscoveryCandidates(candidates)
+        : candidates;
+    final pendingCandidates = ListQueue<SearchCandidate>.from(
+      orderedCandidates,
+    );
+    final activeVerifications = <int, Future<_CandidateVerificationResult>>{};
+    var candidateToken = 0;
+
+    void scheduleNext() {
+      while (activeVerifications.length < concurrency &&
+          pendingCandidates.isNotEmpty &&
+          verifiedByKey.length < verifiedLimit &&
+          !requestContext.isCancelled) {
+        final candidate = pendingCandidates.removeFirst();
+        final token = candidateToken++;
+        activeVerifications[token] = _verifyCandidateWithBudget(
+          token: token,
+          candidate: candidate,
+          gameVersion: gameVersion,
+          requestContext: requestContext,
+          verificationTimeout: verificationTimeout,
+        );
       }
+    }
 
-      final chunkEnd = chunkStart + concurrency > candidates.length
-          ? candidates.length
-          : chunkStart + concurrency;
-      final candidateChunk = candidates.sublist(chunkStart, chunkEnd);
-      final chunkStopwatch = Stopwatch()..start();
-      final verifiedChunk = await Future.wait(
-        candidateChunk.map(
-          (candidate) => _verifiedResolver.verifyCandidate(
-            candidate.item,
-            gameVersion,
-            requestContext: requestContext,
-          ),
-        ),
+    scheduleNext();
+
+    while (activeVerifications.isNotEmpty &&
+        verifiedByKey.length < verifiedLimit) {
+      final completed = await Future.any<_CandidateVerificationResult>(
+        activeVerifications.values,
       );
-      chunkStopwatch.stop();
+      activeVerifications.remove(completed.token);
 
+      checkedCandidates += 1;
       final previousVerifiedCount = verifiedByKey.length;
-      checkedCandidates += candidateChunk.length;
-
-      for (var index = 0; index < candidateChunk.length; index++) {
-        final verifiedItem = verifiedChunk[index];
-        if (verifiedItem == null) {
-          continue;
-        }
-
-        verifiedByKey[candidateChunk[index].key] = verifiedItem;
+      if (completed.verifiedItem != null) {
+        verifiedByKey[completed.candidate.key] = completed.verifiedItem!;
       }
 
       _telemetryService.recordPhase(
         requestContext.traceId,
         'verification_chunk',
-        chunkStopwatch.elapsed,
+        completed.elapsed,
         details: <String, Object?>{
           'checked': checkedCandidates,
-          'chunkSize': candidateChunk.length,
+          'chunkSize': 1,
           'verified': verifiedByKey.length,
           'target': verifiedLimit,
+          'provider': completed.candidate.item.providerName,
         },
       );
 
@@ -502,6 +518,8 @@ class SearchSessionController {
           sessionStopwatch: sessionStopwatch,
         );
       }
+
+      scheduleNext();
     }
 
     return _VerificationProgress(
@@ -688,6 +706,123 @@ class SearchSessionController {
 
     return wowskillCount >= 8 ? 8 : wowskillCount;
   }
+
+  List<SearchCandidate> _interleaveDiscoveryCandidates(
+    List<SearchCandidate> candidates,
+  ) {
+    if (candidates.length < 3) {
+      return candidates;
+    }
+
+    final providerBuckets = <String, ListQueue<SearchCandidate>>{};
+    final providerOrder = <String>[];
+
+    for (final candidate in candidates) {
+      final providerName = candidate.item.providerName;
+      final bucket = providerBuckets.putIfAbsent(providerName, () {
+        providerOrder.add(providerName);
+        return ListQueue<SearchCandidate>();
+      });
+      bucket.add(candidate);
+    }
+
+    final ordered = <SearchCandidate>[];
+    while (ordered.length < candidates.length) {
+      var madeProgress = false;
+
+      for (final providerName in providerOrder) {
+        final bucket = providerBuckets[providerName];
+        if (bucket == null || bucket.isEmpty) {
+          continue;
+        }
+
+        const takeCount = 1;
+        for (var index = 0; index < takeCount && bucket.isNotEmpty; index++) {
+          ordered.add(bucket.removeFirst());
+          madeProgress = true;
+        }
+      }
+
+      if (!madeProgress) {
+        break;
+      }
+    }
+
+    return ordered;
+  }
+
+  Future<_CandidateVerificationResult> _verifyCandidateWithBudget({
+    required int token,
+    required SearchCandidate candidate,
+    required String gameVersion,
+    required ProviderRequestContext requestContext,
+    required Duration? verificationTimeout,
+  }) async {
+    final stopwatch = Stopwatch()..start();
+    final effectiveContext =
+        verificationTimeout != null &&
+            verificationTimeout < requestContext.timeout
+        ? _createChildRequestContext(
+            requestContext,
+            candidate.key,
+            verificationTimeout,
+          )
+        : requestContext;
+
+    try {
+      final verification = _verifiedResolver.verifyCandidate(
+        candidate.item,
+        gameVersion,
+        requestContext: effectiveContext,
+      );
+      final verifiedItem = verificationTimeout == null
+          ? await verification
+          : await verification.timeout(
+              verificationTimeout,
+              onTimeout: () {
+                effectiveContext.cancel('verification_timeout');
+                return null;
+              },
+            );
+      stopwatch.stop();
+      return _CandidateVerificationResult(
+        token: token,
+        candidate: candidate,
+        verifiedItem: verifiedItem,
+        elapsed: stopwatch.elapsed,
+      );
+    } catch (_) {
+      stopwatch.stop();
+      return _CandidateVerificationResult(
+        token: token,
+        candidate: candidate,
+        verifiedItem: null,
+        elapsed: stopwatch.elapsed,
+      );
+    } finally {
+      if (!identical(effectiveContext, requestContext)) {
+        effectiveContext.cancel('verification_completed');
+      }
+    }
+  }
+
+  ProviderRequestContext _createChildRequestContext(
+    ProviderRequestContext parent,
+    String candidateKey,
+    Duration timeout,
+  ) {
+    final childContext = parent.copyWith(
+      traceId: '${parent.traceId}:verify:$candidateKey',
+      cancelToken: CancelToken(),
+      timeout: timeout,
+    );
+    unawaited(
+      parent.cancelToken.whenCancel.then((_) {
+        childContext.cancel('parent_cancelled');
+      }),
+    );
+    return childContext;
+  }
 }
 
 class _ActiveSearchSession {
@@ -705,6 +840,20 @@ class _VerificationProgress {
     required this.checkedCandidates,
     required this.totalCandidates,
     required this.lastSignature,
+  });
+}
+
+class _CandidateVerificationResult {
+  final int token;
+  final SearchCandidate candidate;
+  final AddonItem? verifiedItem;
+  final Duration elapsed;
+
+  const _CandidateVerificationResult({
+    required this.token,
+    required this.candidate,
+    required this.verifiedItem,
+    required this.elapsed,
   });
 }
 

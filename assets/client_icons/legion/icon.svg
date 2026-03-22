@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="legion-bone" x1="256" y1="122" x2="256" y2="402" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF2D2"/>
+      <stop offset=".64" stop-color="#F6E8C8"/>
+      <stop offset="1" stop-color="#C79C63"/>
+    </linearGradient>
+    <linearGradient id="legion-fel" x1="172" y1="174" x2="286" y2="336" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#93FF84"/>
+      <stop offset=".58" stop-color="#62F46A"/>
+      <stop offset="1" stop-color="#1E9C43"/>
+    </linearGradient>
+    <linearGradient id="legion-abyss" x1="256" y1="168" x2="256" y2="376" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#202027"/>
+      <stop offset=".52" stop-color="#101113"/>
+      <stop offset="1" stop-color="#050608"/>
+    </linearGradient>
+  </defs>
+  <rect x="84" y="84" width="344" height="344" rx="92" stroke="#E8D6B2" stroke-width="18"/>
+  <path d="M226 132C183 160 156 204 156 256C156 308 183 352 226 380L246 348C219 329 204 294 204 256C204 218 219 183 246 164L226 132Z" fill="url(#legion-bone)"/>
+  <path d="M214 174C191 194 178 223 178 256C178 289 191 318 214 338L232 316C217 300 210 279 210 256C210 233 217 212 232 196L214 174Z" fill="url(#legion-fel)"/>
+  <path d="M286 132C329 160 356 204 356 256C356 308 329 352 286 380L266 348C293 329 308 294 308 256C308 218 293 183 266 164L286 132Z" fill="url(#legion-bone)"/>
+  <path d="M298 174C321 194 334 223 334 256C334 289 321 318 298 338L280 316C295 300 302 279 302 256C302 233 295 212 280 196L298 174Z" fill="url(#legion-fel)"/>
+  <path d="M234 182C214 169 194 163 174 164L188 136C210 135 230 143 248 158L234 182Z" fill="url(#legion-abyss)"/>
+  <path d="M278 182C298 169 318 163 338 164L324 136C302 135 282 143 264 158L278 182Z" fill="url(#legion-abyss)"/>
+  <path d="M224 186C232 176 243 170 256 170C269 170 280 176 288 186C296 198 300 213 298 232C294 270 282 310 264 346L256 360L248 346C230 310 218 270 214 232C212 213 216 198 224 186Z" fill="url(#legion-abyss)"/>
+  <path d="M214 152C226 134 241 124 256 122C271 124 286 134 298 152L282 184C274 174 266 168 256 168C246 168 238 174 230 184L214 152Z" fill="url(#legion-bone)"/>
+  <path d="M227 154C235 146 245 142 256 142C267 142 277 146 285 154L274 172C268 166 262 164 256 164C250 164 244 166 238 172L227 154Z" fill="#78FF78"/>
+  <path d="M206 256C224 228 243 214 256 214C269 214 288 228 306 256C288 284 269 298 256 298C243 298 224 284 206 256Z" fill="#F6F0E4"/>
+  <path d="M224 256C236 238 246 230 256 230C266 230 276 238 288 256C276 274 266 282 256 282C246 282 236 274 224 256Z" fill="#17181B"/>
+  <path d="M256 240L274 256L256 272L238 256L256 240Z" fill="url(#legion-fel)"/>
+  <path d="M228 324C238 336 247 350 256 370C265 350 274 336 284 324L294 346C284 366 271 382 256 394C241 382 228 366 218 346L228 324Z" fill="#C79C63"/>
+  <path d="M196 182C178 202 168 228 168 256C168 284 178 310 196 330" stroke="#142217" stroke-width="8" stroke-linecap="round" opacity=".72"/>
+  <path d="M316 182C334 202 344 228 344 256C344 284 334 310 316 330" stroke="#142217" stroke-width="8" stroke-linecap="round" opacity=".72"/>
+  <path d="M222 202C232 191 244 186 256 186C268 186 280 191 290 202" stroke="#D7BE84" stroke-width="7" stroke-linecap="round"/>
+</svg>

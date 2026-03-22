@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bfa-gold" x1="256" y1="142" x2="256" y2="394" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF0D1"/>
+      <stop offset=".62" stop-color="#D4A766"/>
+      <stop offset="1" stop-color="#956636"/>
+    </linearGradient>
+    <linearGradient id="bfa-navy" x1="212" y1="184" x2="292" y2="348" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4A6CA7"/>
+      <stop offset=".58" stop-color="#30548F"/>
+      <stop offset="1" stop-color="#1A305E"/>
+    </linearGradient>
+    <linearGradient id="bfa-steel" x1="184" y1="192" x2="236" y2="332" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F6F3EC"/>
+      <stop offset=".62" stop-color="#D5D4D0"/>
+      <stop offset="1" stop-color="#9EA7B1"/>
+    </linearGradient>
+  </defs>
+  <rect x="84" y="84" width="344" height="344" rx="92" stroke="#E8D6B2" stroke-width="18"/>
+  <path d="M218 166C185 179 160 205 148 242C137 279 143 316 164 348C178 368 196 384 221 394L236 360C219 351 206 339 197 322C186 300 185 274 192 248C198 224 212 202 234 188L218 166Z" fill="url(#bfa-gold)"/>
+  <path d="M226 188C208 198 195 216 189 240C183 264 185 287 195 307C202 321 211 333 224 343L236 323C226 316 219 306 214 293C208 276 209 258 214 241C219 224 228 209 241 198L226 188Z" fill="url(#bfa-steel)"/>
+  <path d="M294 166C327 179 352 205 364 242C375 279 369 316 348 348C334 368 316 384 291 394L276 360C293 351 306 339 315 322C326 300 327 274 320 248C314 224 300 202 278 188L294 166Z" fill="url(#bfa-gold)"/>
+  <path d="M286 188C304 198 317 216 323 240C329 264 327 287 317 307C310 321 301 333 288 343L276 323C286 316 293 306 298 293C304 276 303 258 298 241C293 224 284 209 271 198L286 188Z" fill="url(#bfa-steel)"/>
+  <path d="M204 180C219 160 237 150 256 150C275 150 293 160 308 180L292 204C281 194 269 190 256 190C243 190 231 194 220 204L204 180Z" fill="url(#bfa-gold)"/>
+  <path d="M226 198C234 186 245 180 256 180C267 180 278 186 286 198C294 210 298 225 296 244C292 281 279 318 256 352C233 318 220 281 216 244C214 225 218 210 226 198Z" fill="url(#bfa-navy)"/>
+  <path d="M256 198L270 232L304 246L270 260L256 294L242 260L208 246L242 232L256 198Z" fill="#F6F0E4"/>
+  <circle cx="256" cy="246" r="14" fill="#D0A059"/>
+  <path d="M226 320C236 333 246 347 256 368C266 347 276 333 286 320L298 346C287 366 273 382 256 394C239 382 225 366 214 346L226 320Z" fill="url(#bfa-gold)"/>
+  <path d="M220 208C231 198 243 193 256 193C269 193 281 198 292 208" stroke="#D4A766" stroke-width="8" stroke-linecap="round"/>
+  <path d="M194 204C177 227 170 251 170 276C170 299 179 319 198 338" stroke="#5D697B" stroke-width="8" stroke-linecap="round" opacity=".72"/>
+  <path d="M318 204C335 227 342 251 342 276C342 299 333 319 314 338" stroke="#5D697B" stroke-width="8" stroke-linecap="round" opacity=".72"/>
+</svg>

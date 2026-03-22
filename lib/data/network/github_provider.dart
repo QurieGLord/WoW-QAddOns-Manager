@@ -143,6 +143,9 @@ class GitHubProvider extends IAddonProvider {
     );
 
     final queries = <String>[
+      query,
+      '$query in:name',
+      '$query language:Lua',
       if (numericTokens.isNotEmpty)
         '$query "${numericTokens.first}" "wow addon" language:Lua',
       if (numericTokens.length > 1)
@@ -198,7 +201,11 @@ class GitHubProvider extends IAddonProvider {
     AddonItem item,
     String gameVersion,
   ) async {
-    return getDownloadUrlWithContext(item, gameVersion);
+    final artifact = await _resolveDownloadArtifact(item, gameVersion);
+    if (artifact == null) {
+      return null;
+    }
+    return (url: artifact.url, fileName: artifact.fileName);
   }
 
   Future<({String url, String fileName})?> getDownloadUrlWithContext(
@@ -206,8 +213,28 @@ class GitHubProvider extends IAddonProvider {
     String gameVersion, {
     ProviderRequestContext? requestContext,
   }) async {
+    final artifact = await _resolveDownloadArtifact(
+      item,
+      gameVersion,
+      requestContext: requestContext,
+    );
+    if (artifact == null) {
+      return null;
+    }
+    return (url: artifact.url, fileName: artifact.fileName);
+  }
+
+  Future<_GitHubDownloadArtifact?> _resolveDownloadArtifact(
+    AddonItem item,
+    String gameVersion, {
+    ProviderRequestContext? requestContext,
+  }) async {
     if (item.hasVerifiedPayload) {
-      return (url: item.verifiedDownloadUrl!, fileName: item.verifiedFileName!);
+      return _GitHubDownloadArtifact(
+        url: item.verifiedDownloadUrl!,
+        fileName: item.verifiedFileName!,
+        version: item.version,
+      );
     }
 
     final profile = WowVersionProfile.parse(gameVersion);
@@ -221,17 +248,27 @@ class GitHubProvider extends IAddonProvider {
           options: Options(receiveTimeout: timeout, sendTimeout: timeout),
         ),
       );
-      final assets = response.data is Map ? response.data['assets'] : null;
+      final payload = response.data is Map
+          ? Map<String, dynamic>.from(response.data as Map)
+          : const <String, dynamic>{};
+      final assets = payload['assets'];
       final asset = _selectBestZipAsset(assets, profile);
 
       if (asset != null) {
         final url = _readString(asset['browser_download_url']);
         final fileName = _readString(asset['name']);
+        final version =
+            _readString(payload['tag_name']) ??
+            _extractVersionFromFileName(fileName);
         if (url != null && fileName != null) {
           if (kDebugMode) {
             debugPrint('GitHub Release URL: $url');
           }
-          return (url: url, fileName: fileName);
+          return _GitHubDownloadArtifact(
+            url: url,
+            fileName: fileName,
+            version: version,
+          );
         }
       }
     } catch (_) {
@@ -240,6 +277,15 @@ class GitHubProvider extends IAddonProvider {
           'GitHub Release failed, trying branch fallback for ${item.originalId}',
         );
       }
+    }
+
+    final taggedArchive = await _resolveTaggedArchive(
+      item.originalId.toString(),
+      profile: profile,
+      requestContext: requestContext,
+    );
+    if (taggedArchive != null) {
+      return taggedArchive;
     }
 
     return _resolveBranchArchive(
@@ -262,18 +308,19 @@ class GitHubProvider extends IAddonProvider {
       return item;
     }
 
-    final info = await getDownloadUrlWithContext(
+    final artifact = await _resolveDownloadArtifact(
       item,
       gameVersion,
       requestContext: requestContext,
     );
-    if (info == null || info.url.isEmpty || info.fileName.isEmpty) {
+    if (artifact == null || artifact.url.isEmpty || artifact.fileName.isEmpty) {
       return null;
     }
 
     return item.copyWith(
-      verifiedDownloadUrl: info.url,
-      verifiedFileName: info.fileName,
+      version: artifact.version ?? item.version,
+      verifiedDownloadUrl: artifact.url,
+      verifiedFileName: artifact.fileName,
     );
   }
 
@@ -405,7 +452,34 @@ class GitHubProvider extends IAddonProvider {
     return score;
   }
 
-  Future<({String url, String fileName})?> _resolveBranchArchive(
+  Future<_GitHubDownloadArtifact?> _resolveTaggedArchive(
+    String repository, {
+    required WowVersionProfile profile,
+    ProviderRequestContext? requestContext,
+  }) async {
+    final tags = await _fetchTags(repository, requestContext: requestContext);
+    if (tags.isEmpty) {
+      return null;
+    }
+
+    final rankedTags = tags.toList()
+      ..sort((a, b) => _scoreTag(b, profile).compareTo(_scoreTag(a, profile)));
+    final bestTag = rankedTags.first;
+    final tagName = _readString(bestTag['name']);
+    final zipballUrl = _readString(bestTag['zipball_url']);
+    if (tagName == null || zipballUrl == null) {
+      return null;
+    }
+
+    final repositoryName = repository.split('/').last;
+    return _GitHubDownloadArtifact(
+      url: zipballUrl,
+      fileName: '$repositoryName-$tagName.zip',
+      version: tagName,
+    );
+  }
+
+  Future<_GitHubDownloadArtifact?> _resolveBranchArchive(
     String repository, {
     ProviderRequestContext? requestContext,
   }) async {
@@ -426,7 +500,11 @@ class GitHubProvider extends IAddonProvider {
       final url =
           'https://github.com/$repository/archive/refs/heads/$branch.zip';
       if (await _branchArchiveExists(url, requestContext: requestContext)) {
-        return (url: url, fileName: '$repositoryName-$branch.zip');
+        return _GitHubDownloadArtifact(
+          url: url,
+          fileName: '$repositoryName-$branch.zip',
+          version: branch,
+        );
       }
     }
 
@@ -457,6 +535,33 @@ class GitHubProvider extends IAddonProvider {
     }
   }
 
+  Future<List<Map<String, dynamic>>> _fetchTags(
+    String repository, {
+    ProviderRequestContext? requestContext,
+  }) async {
+    try {
+      final response = await executeWithRetry<Response<dynamic>>(
+        requestContext: requestContext,
+        task: (cancelToken, timeout) => _dio.get(
+          '/repos/$repository/tags',
+          queryParameters: const <String, dynamic>{'per_page': 20},
+          cancelToken: cancelToken,
+          options: Options(receiveTimeout: timeout, sendTimeout: timeout),
+        ),
+      );
+      if (response.data is! List) {
+        return const <Map<String, dynamic>>[];
+      }
+
+      return (response.data as List<dynamic>)
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList(growable: false);
+    } catch (_) {
+      return const <Map<String, dynamic>>[];
+    }
+  }
+
   Future<bool> _branchArchiveExists(
     String url, {
     ProviderRequestContext? requestContext,
@@ -481,6 +586,16 @@ class GitHubProvider extends IAddonProvider {
     } catch (_) {
       return false;
     }
+  }
+
+  int _scoreTag(Map<String, dynamic> tag, WowVersionProfile profile) {
+    final tagName = _readString(tag['name']) ?? '';
+    final versionScore = profile.numericCompatibilityScore(<String>[tagName]);
+    if (versionScore > 0) {
+      return versionScore + 100;
+    }
+
+    return 10;
   }
 
   String? _readString(Object? value) {
@@ -571,4 +686,28 @@ class GitHubProvider extends IAddonProvider {
   String _normalizeIdentity(String value) {
     return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '').trim();
   }
+
+  String? _extractVersionFromFileName(String? fileName) {
+    if (fileName == null || fileName.trim().isEmpty) {
+      return null;
+    }
+
+    final match = RegExp(
+      r'v?\d+(?:\.\d+){1,3}',
+      caseSensitive: false,
+    ).firstMatch(fileName);
+    return match?.group(0);
+  }
+}
+
+class _GitHubDownloadArtifact {
+  final String url;
+  final String fileName;
+  final String? version;
+
+  const _GitHubDownloadArtifact({
+    required this.url,
+    required this.fileName,
+    required this.version,
+  });
 }

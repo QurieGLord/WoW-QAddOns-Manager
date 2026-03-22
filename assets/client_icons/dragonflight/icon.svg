@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="df-gold" x1="256" y1="138" x2="256" y2="394" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF0D1"/>
+      <stop offset=".62" stop-color="#D6A763"/>
+      <stop offset="1" stop-color="#95612E"/>
+    </linearGradient>
+    <linearGradient id="df-ruby" x1="222" y1="172" x2="286" y2="360" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F08A82"/>
+      <stop offset=".54" stop-color="#D65757"/>
+      <stop offset="1" stop-color="#8F2525"/>
+    </linearGradient>
+    <linearGradient id="df-sky" x1="212" y1="170" x2="282" y2="264" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D9F1FF"/>
+      <stop offset=".58" stop-color="#8CC9FF"/>
+      <stop offset="1" stop-color="#4C90CF"/>
+    </linearGradient>
+    <linearGradient id="df-iron" x1="256" y1="176" x2="256" y2="342" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#352A2A"/>
+      <stop offset=".58" stop-color="#181315"/>
+      <stop offset="1" stop-color="#090809"/>
+    </linearGradient>
+  </defs>
+  <rect x="84" y="84" width="344" height="344" rx="92" stroke="#E8D6B2" stroke-width="18"/>
+  <path d="M214 160C181 175 157 203 146 240C136 278 143 315 164 348C178 368 196 384 220 394L236 360C218 351 205 339 196 321C185 300 184 274 191 248C197 223 211 202 234 186L214 160Z" fill="url(#df-gold)"/>
+  <path d="M226 184C207 195 194 213 188 238C182 262 184 286 196 307C203 321 213 333 227 344L238 322C228 315 220 305 215 292C209 275 210 257 215 240C220 223 230 209 244 198L226 184Z" fill="#F7EAD3" opacity=".9"/>
+  <path d="M298 160C331 175 355 203 366 240C376 278 369 315 348 348C334 368 316 384 292 394L276 360C294 351 307 339 316 321C327 300 328 274 321 248C315 223 301 202 278 186L298 160Z" fill="url(#df-gold)"/>
+  <path d="M286 184C305 195 318 213 324 238C330 262 328 286 316 307C309 321 299 333 285 344L274 322C284 315 292 305 297 292C303 275 302 257 297 240C292 223 282 209 268 198L286 184Z" fill="#F7EAD3" opacity=".9"/>
+  <path d="M204 176L224 146L242 164L256 132L270 164L288 146L308 176L290 198C279 189 268 184 256 184C244 184 233 189 222 198L204 176Z" fill="url(#df-gold)"/>
+  <path d="M214 168L226 148L238 166L226 180L214 168Z" fill="url(#df-sky)"/>
+  <path d="M248 146L256 130L264 146L256 158L248 146Z" fill="url(#df-sky)"/>
+  <path d="M274 168L286 148L298 166L286 180L274 168Z" fill="url(#df-sky)"/>
+  <path d="M230 190C238 178 247 172 256 172C265 172 274 178 282 190C290 202 294 218 292 238C288 274 276 310 256 346C236 310 224 274 220 238C218 218 222 202 230 190Z" fill="url(#df-iron)"/>
+  <path d="M248 176L256 160L264 176L270 258L256 330L242 258L248 176Z" fill="url(#df-ruby)"/>
+  <path d="M256 196L274 222L256 244L238 222L256 196Z" fill="url(#df-sky)"/>
+  <path d="M222 320C234 334 245 349 256 370C267 349 278 334 290 320L298 346C287 366 273 382 256 394C239 382 225 366 214 346L222 320Z" fill="url(#df-gold)"/>
+  <path d="M236 328C244 339 250 351 256 364C262 351 268 339 276 328L282 346C274 360 265 372 256 382C247 372 238 360 230 346L236 328Z" fill="url(#df-ruby)"/>
+  <path d="M220 206C231 196 243 191 256 191C269 191 281 196 292 206" stroke="#D7A762" stroke-width="8" stroke-linecap="round"/>
+  <path d="M194 202C177 225 170 249 170 274C170 297 179 318 198 336" stroke="#C7E5FF" stroke-width="8" stroke-linecap="round" opacity=".75"/>
+  <path d="M318 202C335 225 342 249 342 274C342 297 333 318 314 336" stroke="#C7E5FF" stroke-width="8" stroke-linecap="round" opacity=".75"/>
+</svg>

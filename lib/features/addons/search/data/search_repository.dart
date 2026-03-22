@@ -33,7 +33,11 @@ class SearchCandidate {
 class SearchRepository {
   static const Duration searchCacheTtl = Duration(minutes: 10);
   static const Duration discoveryCacheTtl = Duration(minutes: 30);
-  static const int searchCandidateLimitPerProvider = 40;
+  static const int searchCandidateLimitPerProvider = 60;
+  static const String _searchCandidateCacheNamespace =
+      'search_candidate_windows_v2';
+  static const String _searchCandidateInflightNamespace =
+      'search_candidate_windows_inflight_v2';
   static const Duration initialSecondaryProviderBudget = Duration(
     milliseconds: 900,
   );
@@ -68,7 +72,7 @@ class SearchRepository {
 
     final cacheKey = '$normalizedVersion|${normalizedQuery.toLowerCase()}';
     final cached = await _readCandidatesFromCache(
-      namespace: 'search_candidate_windows',
+      namespace: _searchCandidateCacheNamespace,
       key: cacheKey,
       requestContext: requestContext,
     );
@@ -86,7 +90,7 @@ class SearchRepository {
     }
 
     return _cacheService.coalesce(
-      'search_candidate_windows_inflight',
+      _searchCandidateInflightNamespace,
       cacheKey,
       () async {
         final providerResults = await Future.wait<_ProviderItemsResult>(
@@ -165,7 +169,7 @@ class SearchRepository {
           },
         );
         await _writeCandidatesToCache(
-          namespace: 'search_candidate_windows',
+          namespace: _searchCandidateCacheNamespace,
           key: cacheKey,
           candidates: ranked,
           ttl: searchCacheTtl,
@@ -434,9 +438,14 @@ class SearchRepository {
       return 0;
     }
 
+    final queryTokens = _tokenizeIdentity(query);
     final normalizedName = _normalizeIdentity(item.name);
     final normalizedSlug = _normalizeIdentity(item.sourceSlug ?? '');
     final normalizedSummary = _normalizeIdentity(item.summary);
+    final normalizedHints = item.identityHints
+        .map(_normalizeIdentity)
+        .where((hint) => hint.isNotEmpty)
+        .toList(growable: false);
     var score = 0;
 
     if (normalizedName == normalizedQuery ||
@@ -450,6 +459,21 @@ class SearchRepository {
       score += 110;
     } else if (normalizedSummary.contains(normalizedQuery)) {
       score += 40;
+    }
+
+    if (normalizedHints.any((hint) => hint == normalizedQuery)) {
+      score += 220;
+    } else if (normalizedHints.any((hint) => hint.contains(normalizedQuery))) {
+      score += 120;
+    }
+
+    if (_matchesAllIdentityTokens(<String>[
+      item.name,
+      item.sourceSlug ?? '',
+      item.summary,
+      ...item.identityHints,
+    ], queryTokens)) {
+      score += 90;
     }
 
     if (item.providerName == CurseForgeProvider.staticProviderName) {
@@ -562,6 +586,29 @@ class SearchRepository {
 
   String _normalizeIdentity(String value) {
     return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '').trim();
+  }
+
+  List<String> _tokenizeIdentity(String value) {
+    return value
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9]+'))
+        .map((token) => token.trim())
+        .where((token) => token.length >= 2)
+        .toList(growable: false);
+  }
+
+  bool _matchesAllIdentityTokens(List<String> haystacks, List<String> tokens) {
+    if (tokens.isEmpty) {
+      return false;
+    }
+
+    final normalizedHaystack = haystacks
+        .map(_normalizeIdentity)
+        .where((value) => value.isNotEmpty)
+        .join(' ');
+    return tokens.every(
+      (token) => normalizedHaystack.contains(_normalizeIdentity(token)),
+    );
   }
 }
 

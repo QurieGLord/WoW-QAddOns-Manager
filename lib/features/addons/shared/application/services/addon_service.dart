@@ -25,6 +25,8 @@ abstract class AddonService {
     String gameVersion,
   );
 
+  Future<AddonItem?> verifyCandidate(AddonItem item, String gameVersion);
+
   AddonInstalledMatch matchInstalledAddon(
     AddonItem item,
     List<InstalledAddonGroup> installedGroups,

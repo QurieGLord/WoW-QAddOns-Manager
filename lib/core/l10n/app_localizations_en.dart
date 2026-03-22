@@ -173,6 +173,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get clientDetailsTitle => 'Client Details';
 
   @override
+  String get clientLaunchAction => 'Launch game';
+
+  @override
+  String get clientLaunchMissingExecutable =>
+      'The game executable couldn\'t be found for this client.';
+
+  @override
+  String get clientLaunchInvalidPath =>
+      'The client folder is unavailable or no longer exists.';
+
+  @override
+  String get clientLaunchFailed => 'Couldn\'t launch the game client.';
+
+  @override
   String get clientDetailsLoadingAddons => 'Loading installed addons...';
 
   @override
@@ -264,4 +278,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get addonNoDescription => 'No description available';
+
+  @override
+  String get addonDetailsGalleryTitle => 'Screenshots';
+
+  @override
+  String get addonDetailsDescriptionTitle => 'Description';
+
+  @override
+  String get addonDetailsClose => 'Close';
 }

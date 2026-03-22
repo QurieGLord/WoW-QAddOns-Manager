@@ -8,7 +8,7 @@ import 'package:wow_qaddons_manager/domain/models/curseforge/cf_file.dart';
 import 'package:wow_qaddons_manager/domain/models/curseforge/cf_mod.dart';
 
 class CurseForgeClient {
-  static const int _searchPageSize = 40;
+  static const int _searchPageSize = 50;
   static const int _discoveryPageSize = 50;
   static const int _historyPageSize = 200;
   static const int _maxHistoryPages = 10;
@@ -46,6 +46,7 @@ class CurseForgeClient {
     try {
       final requestedVersion = gameVersion?.trim() ?? '';
       final profile = WowVersionProfile.parse(requestedVersion);
+      final queryVariants = _buildSearchQueryVariants(normalizedQuery);
       final attempts = <String?>[
         if (requestedVersion.isNotEmpty &&
             !profile.apiVersionCandidates.contains(
@@ -56,15 +57,15 @@ class CurseForgeClient {
         null,
       ];
 
-      final responses = await Future.wait(
-        attempts.map(
-          (attemptVersion) => _searchModsRequest(
-            normalizedQuery,
-            gameVersion: attemptVersion,
-            requestContext: requestContext,
-          ),
-        ),
-      );
+      final responses = await Future.wait(<Future<List<CfMod>>>[
+        for (final attemptVersion in attempts)
+          for (final queryVariant in queryVariants)
+            _searchModsRequest(
+              queryVariant,
+              gameVersion: attemptVersion,
+              requestContext: requestContext,
+            ),
+      ]);
 
       final modsById = <int, CfMod>{};
       for (final mods in responses) {
@@ -80,6 +81,41 @@ class CurseForgeClient {
       }
       return const <CfMod>[];
     }
+  }
+
+  List<String> _buildSearchQueryVariants(String query) {
+    final normalizedQuery = query.trim();
+    final variants = <String>[];
+
+    void addVariant(String value) {
+      final normalizedValue = value.trim();
+      if (normalizedValue.isEmpty || variants.contains(normalizedValue)) {
+        return;
+      }
+      variants.add(normalizedValue);
+    }
+
+    addVariant(normalizedQuery);
+
+    final tokens = normalizedQuery
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9]+'))
+        .map((token) => token.trim())
+        .where((token) => token.length >= 2)
+        .toList(growable: false);
+
+    if (tokens.isEmpty) {
+      return variants;
+    }
+
+    addVariant(tokens.join(' '));
+
+    if (tokens.length > 1) {
+      addVariant(tokens.take(2).join(' '));
+      addVariant(tokens.first);
+    }
+
+    return variants;
   }
 
   Future<List<CfMod>> fetchPopularMods(
@@ -342,7 +378,7 @@ class CurseForgeClient {
       'gameId': 1,
       'sortField': sortField,
       'sortOrder': 'desc',
-      'pageSize': pageSize,
+      'pageSize': pageSize.clamp(1, _searchPageSize),
     };
 
     final normalizedQuery = query.trim();

@@ -50,6 +50,7 @@ dependencies:
   flutter_dotenv: ^6.0.0
   archive: ^4.0.9
   url_launcher: ^6.3.2
+  flutter_improved_scrolling: ^0.0.4
 
 dev_dependencies:
   flutter_test:
@@ -95,6 +96,32 @@ flutter:
     - icon.png
     - .env
     - assets/client_cards/
+    - assets/client_cards/battle_for_azeroth/
+    - assets/client_cards/burning_crusade/
+    - assets/client_cards/cataclysm/
+    - assets/client_cards/classic_era/
+    - assets/client_cards/dragonflight/
+    - assets/client_cards/generic/
+    - assets/client_cards/legion/
+    - assets/client_cards/mists_of_pandaria/
+    - assets/client_cards/shadowlands/
+    - assets/client_cards/the_war_within/
+    - assets/client_cards/warlords_of_draenor/
+    - assets/client_cards/wrath/
+    - assets/client_icons/
+    - assets/client_icons/battle_for_azeroth/
+    - assets/client_icons/burning_crusade/
+    - assets/client_icons/cataclysm/
+    - assets/client_icons/classic_era/
+    - assets/client_icons/dragonflight/
+    - assets/client_icons/generic/
+    - assets/client_icons/legion/
+    - assets/client_icons/midnight/
+    - assets/client_icons/mists_of_pandaria/
+    - assets/client_icons/shadowlands/
+    - assets/client_icons/the_war_within/
+    - assets/client_icons/warlords_of_draenor/
+    - assets/client_icons/wrath/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

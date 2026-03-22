@@ -52,6 +52,10 @@
   "scanTitle": "Поиск игровых клиентов",
   "noClientsFound": "Клиенты WoW не найдены. Пожалуйста, выберите папку вручную.",
   "clientDetailsTitle": "Сведения о клиенте",
+  "clientLaunchAction": "Запустить игру",
+  "clientLaunchMissingExecutable": "Для этого клиента не удалось найти исполняемый файл игры.",
+  "clientLaunchInvalidPath": "Папка клиента недоступна или больше не существует.",
+  "clientLaunchFailed": "Не удалось запустить игровой клиент.",
   "clientDetailsLoadingAddons": "Загрузка установленных аддонов...",
   "clientDetailsLoadErrorTitle": "Не удалось загрузить установленные аддоны",
   "clientDetailsLoadErrorMessage": "Не удалось загрузить список установленных аддонов: {details}",
@@ -140,5 +144,8 @@
       "version": {}
     }
   },
-  "addonNoDescription": "Описание отсутствует"
+  "addonNoDescription": "Описание отсутствует",
+  "addonDetailsGalleryTitle": "Скриншоты",
+  "addonDetailsDescriptionTitle": "Описание",
+  "addonDetailsClose": "Закрыть"
 }
