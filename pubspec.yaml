@@ -122,6 +122,7 @@ flutter:
     - assets/client_icons/the_war_within/
     - assets/client_icons/warlords_of_draenor/
     - assets/client_icons/wrath/
+    - assets/manifests/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

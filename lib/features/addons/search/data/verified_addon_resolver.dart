@@ -2,6 +2,7 @@ import 'package:wow_qaddons_manager/core/services/cache_service.dart';
 import 'package:wow_qaddons_manager/core/services/provider_request_context.dart';
 import 'package:wow_qaddons_manager/core/services/search_telemetry_service.dart';
 import 'package:wow_qaddons_manager/domain/models/addon_item.dart';
+import 'package:wow_qaddons_manager/features/addons/elvui/application/elvui_resolver_service.dart';
 import 'package:wow_qaddons_manager/features/addons/shared/application/services/provider_services.dart';
 
 class VerifiedAddonResolver {
@@ -13,6 +14,7 @@ class VerifiedAddonResolver {
   final CurseForgeService _curseForgeService;
   final GitHubService _gitHubService;
   final WowskillService _wowskillService;
+  final ElvUiResolverService _elvUiResolver;
   final CacheService _cacheService;
   final SearchTelemetryService _telemetryService;
 
@@ -20,6 +22,7 @@ class VerifiedAddonResolver {
     this._curseForgeService,
     this._gitHubService,
     this._wowskillService,
+    this._elvUiResolver,
     this._cacheService,
     this._telemetryService,
   );
@@ -168,6 +171,9 @@ class VerifiedAddonResolver {
   }
 
   dynamic _resolveProvider(AddonItem item) {
+    if (_elvUiResolver.isManifestBackedItem(item)) {
+      return _ElvUiVerifierAdapter(_elvUiResolver);
+    }
     if (item.providerName == 'CurseForge') {
       return _curseForgeService;
     }
@@ -175,5 +181,19 @@ class VerifiedAddonResolver {
       return _wowskillService;
     }
     return _gitHubService;
+  }
+}
+
+class _ElvUiVerifierAdapter {
+  final ElvUiResolverService _resolver;
+
+  const _ElvUiVerifierAdapter(this._resolver);
+
+  Future<AddonItem?> verifyCandidate(
+    AddonItem item,
+    String gameVersion, {
+    ProviderRequestContext? requestContext,
+  }) {
+    return _resolver.verifyCandidate(item, gameVersion);
   }
 }

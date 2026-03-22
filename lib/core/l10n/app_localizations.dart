@@ -560,6 +560,36 @@ abstract class AppLocalizations {
   /// **'Ver: {version}'**
   String addonVersionLabel(Object version);
 
+  /// No description provided for @elvuiVerifiedExactClassification.
+  ///
+  /// In en, this message translates to:
+  /// **'Verified exact match'**
+  String get elvuiVerifiedExactClassification;
+
+  /// No description provided for @elvuiVerifiedBranchClassification.
+  ///
+  /// In en, this message translates to:
+  /// **'Verified branch-compatible build'**
+  String get elvuiVerifiedBranchClassification;
+
+  /// No description provided for @elvuiNotVerifiedClassification.
+  ///
+  /// In en, this message translates to:
+  /// **'Not verified'**
+  String get elvuiNotVerifiedClassification;
+
+  /// No description provided for @elvuiNotVerifiedAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Not verified'**
+  String get elvuiNotVerifiedAction;
+
+  /// No description provided for @elvuiNotVerifiedForVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'ElvUI is not yet verified for client version {version}.'**
+  String elvuiNotVerifiedForVersion(Object version);
+
   /// No description provided for @addonNoDescription.
   ///
   /// In en, this message translates to:

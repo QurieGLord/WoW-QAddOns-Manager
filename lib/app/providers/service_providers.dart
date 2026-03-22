@@ -18,6 +18,8 @@ import 'package:wow_qaddons_manager/data/services/hybrid_cache_service.dart';
 import 'package:wow_qaddons_manager/data/services/local_file_system_service.dart';
 import 'package:wow_qaddons_manager/data/services/local_background_task_service.dart';
 import 'package:wow_qaddons_manager/data/services/wow_scanner_service.dart';
+import 'package:wow_qaddons_manager/features/addons/elvui/application/elvui_resolver_service.dart';
+import 'package:wow_qaddons_manager/features/addons/elvui/data/elvui_manifest_repository.dart';
 import 'package:wow_qaddons_manager/features/addons/search/application/search_session_controller.dart';
 import 'package:wow_qaddons_manager/features/addons/search/data/search_repository.dart';
 import 'package:wow_qaddons_manager/features/addons/search/data/verified_addon_resolver.dart';
@@ -72,11 +74,22 @@ final wowskillServiceProvider = Provider<WowskillService>((ref) {
   return DefaultWowskillService(ref.read(wowskillProviderAdapterProvider));
 });
 
+final elvUiManifestRepositoryProvider = Provider<ElvUiManifestRepository>((
+  ref,
+) {
+  return ElvUiManifestRepository();
+});
+
+final elvUiResolverServiceProvider = Provider<ElvUiResolverService>((ref) {
+  return ElvUiResolverService(ref.read(elvUiManifestRepositoryProvider));
+});
+
 final searchRepositoryProvider = Provider<SearchRepository>((ref) {
   return SearchRepository(
     ref.read(curseForgeServiceProvider),
     ref.read(githubServiceProvider),
     ref.read(wowskillServiceProvider),
+    ref.read(elvUiResolverServiceProvider),
     ref.read(cacheServiceProvider),
     ref.read(searchTelemetryServiceProvider),
   );
@@ -87,6 +100,7 @@ final verifiedAddonResolverProvider = Provider<VerifiedAddonResolver>((ref) {
     ref.read(curseForgeServiceProvider),
     ref.read(githubServiceProvider),
     ref.read(wowskillServiceProvider),
+    ref.read(elvUiResolverServiceProvider),
     ref.read(cacheServiceProvider),
     ref.read(searchTelemetryServiceProvider),
   );

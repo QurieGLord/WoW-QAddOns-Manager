@@ -279,6 +279,23 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
+  String get elvuiVerifiedExactClassification => 'Верифицировано точно';
+
+  @override
+  String get elvuiVerifiedBranchClassification => 'Верифицировано по ветке';
+
+  @override
+  String get elvuiNotVerifiedClassification => 'Не верифицировано';
+
+  @override
+  String get elvuiNotVerifiedAction => 'Не верифицировано';
+
+  @override
+  String elvuiNotVerifiedForVersion(Object version) {
+    return 'ElvUI пока не верифицирован для версии клиента $version.';
+  }
+
+  @override
   String get addonNoDescription => 'Описание отсутствует';
 
   @override

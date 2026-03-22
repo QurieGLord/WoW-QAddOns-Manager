@@ -27,21 +27,21 @@ class WowVersionProfile {
 
   factory WowVersionProfile.parse(String version) {
     final normalized = version.trim().toLowerCase();
-    final components =
-        RegExp(r'\d+')
-            .allMatches(normalized)
-            .map((match) => int.tryParse(match.group(0)!))
-            .whereType<int>()
-            .toList(growable: false);
+    final components = RegExp(r'\d+')
+        .allMatches(normalized)
+        .map((match) => int.tryParse(match.group(0)!))
+        .whereType<int>()
+        .toList(growable: false);
 
     final major = components.isNotEmpty ? components[0] : null;
     final minor = components.length > 1 ? components[1] : null;
     final patch = components.length > 2 ? components[2] : null;
-    final exactVersion =
-        major != null && minor != null && patch != null
-            ? '$major.$minor.$patch'
-            : normalized;
-    final majorMinor = major != null && minor != null ? '$major.$minor' : normalized;
+    final exactVersion = major != null && minor != null && patch != null
+        ? '$major.$minor.$patch'
+        : normalized;
+    final majorMinor = major != null && minor != null
+        ? '$major.$minor'
+        : normalized;
 
     return WowVersionProfile._(
       rawVersion: version,
@@ -87,8 +87,10 @@ class WowVersionProfile {
 
     final candidates = <String>[
       if (_looksLikeVersion(normalizedVersion)) normalizedVersion,
-      if (_looksLikeVersion(exactVersion) && exactVersion != normalizedVersion) exactVersion,
-      if (_looksLikeVersion(majorMinor) && majorMinor != exactVersion) majorMinor,
+      if (_looksLikeVersion(exactVersion) && exactVersion != normalizedVersion)
+        exactVersion,
+      if (_looksLikeVersion(majorMinor) && majorMinor != exactVersion)
+        majorMinor,
     ];
 
     return candidates.toSet().toList(growable: false);
@@ -113,6 +115,42 @@ class WowVersionProfile {
     final haystack = text.toLowerCase();
     for (final token in searchVersionTokens) {
       if (_containsToken(haystack, token)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool containsExplicitRequestedBranchEvidence(String text) {
+    final haystack = text.toLowerCase();
+    if (haystack.trim().isEmpty || containsConflictingVersionMarker(haystack)) {
+      return false;
+    }
+
+    if (_looksLikeVersion(exactVersion) &&
+        exactVersion != majorMinor &&
+        _containsToken(haystack, exactVersion)) {
+      return true;
+    }
+
+    if (_looksLikeVersion(majorMinor) && _containsToken(haystack, majorMinor)) {
+      return true;
+    }
+
+    if (major != null &&
+        RegExp(
+          '(?<!\\d)${RegExp.escape('$major')}(?:\\.\\d|\\.x|x)(?!\\d)',
+          caseSensitive: false,
+        ).hasMatch(haystack)) {
+      return true;
+    }
+
+    return _containsFamilyAlias(haystack);
+  }
+
+  bool hasExplicitRequestedBranchEvidence(Iterable<String> values) {
+    for (final value in values) {
+      if (containsExplicitRequestedBranchEvidence(value)) {
         return true;
       }
     }
@@ -262,7 +300,8 @@ class WowVersionProfile {
           continue;
         }
 
-        if (allowsSameMajorBranchFallback && _isAllowedSameMajorBranch(branch)) {
+        if (allowsSameMajorBranchFallback &&
+            _isAllowedSameMajorBranch(branch)) {
           continue;
         }
 
@@ -307,15 +346,18 @@ class WowVersionProfile {
     }
 
     final normalizedToken = token.toLowerCase();
-    final pattern =
-        RegExp(r'^\d+(?:\.\d+)+[a-z]?$').hasMatch(normalizedToken)
-            ? '(?<!\\d)${RegExp.escape(normalizedToken)}(?!\\d)'
-            : '(?<![a-z0-9])${RegExp.escape(normalizedToken)}(?![a-z0-9])';
+    final pattern = RegExp(r'^\d+(?:\.\d+)+[a-z]?$').hasMatch(normalizedToken)
+        ? '(?<!\\d)${RegExp.escape(normalizedToken)}(?!\\d)'
+        : '(?<![a-z0-9])${RegExp.escape(normalizedToken)}(?![a-z0-9])';
 
     return RegExp(pattern, caseSensitive: false).hasMatch(text);
   }
 
-  static WowVersionFamily _detectFamily(String normalizedVersion, int? major, int? minor) {
+  static WowVersionFamily _detectFamily(
+    String normalizedVersion,
+    int? major,
+    int? minor,
+  ) {
     if (normalizedVersion.isNotEmpty) {
       for (final entry in _familyAliases.entries) {
         for (final alias in entry.value) {
@@ -353,10 +395,23 @@ class WowVersionProfile {
 
   static const Map<WowVersionFamily, List<String>> _familyBranches = {
     WowVersionFamily.vanilla: <String>['1.12', '1.13', '1.14', '1.15'],
-    WowVersionFamily.burningCrusade: <String>['2.0', '2.1', '2.2', '2.3', '2.4', '2.5'],
+    WowVersionFamily.burningCrusade: <String>[
+      '2.0',
+      '2.1',
+      '2.2',
+      '2.3',
+      '2.4',
+      '2.5',
+    ],
     WowVersionFamily.wrath: <String>['3.0', '3.1', '3.2', '3.3', '3.4'],
     WowVersionFamily.cataclysm: <String>['4.0', '4.1', '4.2', '4.3', '4.4'],
-    WowVersionFamily.mistsOfPandaria: <String>['5.0', '5.1', '5.2', '5.3', '5.4'],
+    WowVersionFamily.mistsOfPandaria: <String>[
+      '5.0',
+      '5.1',
+      '5.2',
+      '5.3',
+      '5.4',
+    ],
     WowVersionFamily.warlordsOfDraenor: <String>['6.0', '6.1', '6.2'],
     WowVersionFamily.legion: <String>['7.0', '7.1', '7.2', '7.3'],
     WowVersionFamily.battleForAzeroth: <String>['8.0', '8.1', '8.2', '8.3'],
@@ -399,22 +454,12 @@ class WowVersionProfile {
       'mist of pandaria',
       'mists of pandaria',
     ],
-    WowVersionFamily.warlordsOfDraenor: <String>[
-      'wod',
-      'warlords of draenor',
-    ],
+    WowVersionFamily.warlordsOfDraenor: <String>['wod', 'warlords of draenor'],
     WowVersionFamily.legion: <String>['legion'],
-    WowVersionFamily.battleForAzeroth: <String>[
-      'bfa',
-      'battle for azeroth',
-    ],
+    WowVersionFamily.battleForAzeroth: <String>['bfa', 'battle for azeroth'],
     WowVersionFamily.shadowlands: <String>['shadowlands'],
     WowVersionFamily.dragonflight: <String>['dragonflight'],
-    WowVersionFamily.warWithin: <String>[
-      'war within',
-      'the war within',
-      'tww',
-    ],
+    WowVersionFamily.warWithin: <String>['war within', 'the war within', 'tww'],
     WowVersionFamily.unknown: <String>[],
   };
 }

@@ -144,6 +144,16 @@
       "version": {}
     }
   },
+  "elvuiVerifiedExactClassification": "Верифицировано точно",
+  "elvuiVerifiedBranchClassification": "Верифицировано по ветке",
+  "elvuiNotVerifiedClassification": "Не верифицировано",
+  "elvuiNotVerifiedAction": "Не верифицировано",
+  "elvuiNotVerifiedForVersion": "ElvUI пока не верифицирован для версии клиента {version}.",
+  "@elvuiNotVerifiedForVersion": {
+    "placeholders": {
+      "version": {}
+    }
+  },
   "addonNoDescription": "Описание отсутствует",
   "addonDetailsGalleryTitle": "Скриншоты",
   "addonDetailsDescriptionTitle": "Описание",

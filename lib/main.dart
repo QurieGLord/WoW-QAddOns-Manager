@@ -24,6 +24,7 @@ import 'package:wow_qaddons_manager/data/services/addon_identity_service.dart';
 import 'package:wow_qaddons_manager/data/services/addon_installer_service.dart';
 import 'package:wow_qaddons_manager/domain/models/addon_feed_state.dart';
 import 'package:wow_qaddons_manager/domain/models/addon_item.dart';
+import 'package:wow_qaddons_manager/domain/models/addon_resolution_classification.dart';
 import 'package:wow_qaddons_manager/domain/models/game_client.dart';
 import 'package:wow_qaddons_manager/domain/models/installed_addon.dart';
 import 'package:wow_qaddons_manager/features/addons/local/presentation/local_addons_providers.dart';
@@ -3682,7 +3683,46 @@ class AddonSearchResultTile extends ConsumerStatefulWidget {
 class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
   bool _isInstalling = false;
 
+  AddonResolutionClassification get _resolutionClassification =>
+      widget.mod.resolutionClassification;
+
+  bool get _hasVisibleVersion =>
+      widget.mod.version.trim().isNotEmpty && widget.mod.version != 'N/A';
+
+  bool get _isInstallBlockedByVerification =>
+      _resolutionClassification == AddonResolutionClassification.notVerified &&
+      !widget.installedMatch.isInstalled;
+
+  String _resolvedSummary(AppLocalizations l10n) {
+    if (_resolutionClassification ==
+        AddonResolutionClassification.notVerified) {
+      return l10n.elvuiNotVerifiedForVersion(widget.client.version);
+    }
+
+    final summary = widget.mod.summary.trim();
+    if (summary.isEmpty) {
+      return l10n.addonNoDescription;
+    }
+    return summary;
+  }
+
+  String? _resolutionLabel(AppLocalizations l10n) {
+    return switch (_resolutionClassification) {
+      AddonResolutionClassification.exact =>
+        l10n.elvuiVerifiedExactClassification,
+      AddonResolutionClassification.branchCompatible =>
+        l10n.elvuiVerifiedBranchClassification,
+      AddonResolutionClassification.notVerified =>
+        l10n.elvuiNotVerifiedClassification,
+      AddonResolutionClassification.standard => null,
+    };
+  }
+
   Future<bool> _handleInstall() async {
+    if (_isInstallBlockedByVerification) {
+      return false;
+    }
+
     final locale = ref.read(appSettingsProvider).locale.languageCode;
     setState(() => _isInstalling = true);
 
@@ -3801,6 +3841,8 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
     required bool isBusy,
     VoidCallback? onInstallPressed,
   }) {
+    final l10n = AppLocalizations.of(context)!;
+
     if (isInstalled) {
       return FilledButton.tonalIcon(
         onPressed: () {},
@@ -3814,8 +3856,22 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
       );
     }
 
+    if (_resolutionClassification ==
+        AddonResolutionClassification.notVerified) {
+      return FilledButton.tonalIcon(
+        onPressed: null,
+        style: _addonActionButtonStyle(context, installed: false),
+        icon: const Icon(Icons.info_outline_rounded, size: 16),
+        label: Text(
+          l10n.elvuiNotVerifiedAction,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      );
+    }
+
     return FilledButton.tonal(
-      onPressed: isBusy ? () {} : onInstallPressed,
+      onPressed: isBusy ? null : onInstallPressed,
       style: _addonActionButtonStyle(context, installed: false),
       child: isBusy
           ? const SizedBox(
@@ -3831,9 +3887,8 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
     final l10n = AppLocalizations.of(context)!;
     final colorScheme = Theme.of(context).colorScheme;
     final authorName = widget.mod.author?.trim();
-    final summary = widget.mod.summary.trim().isEmpty
-        ? l10n.addonNoDescription
-        : widget.mod.summary;
+    final summary = _resolvedSummary(l10n);
+    final resolutionLabel = _resolutionLabel(l10n);
     final screenshotUrls = widget.mod.screenshotUrls
         .where((url) => url.trim().isNotEmpty)
         .toList(growable: false);
@@ -3894,12 +3949,18 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
                                 _ProviderBadge(
                                   providerName: widget.mod.providerName,
                                 ),
-                                _AddonMetadataChip(
-                                  icon: Icons.sell_outlined,
-                                  label: l10n.addonVersionLabel(
-                                    widget.mod.version,
+                                if (resolutionLabel != null)
+                                  _AddonResolutionChip(
+                                    classification: _resolutionClassification,
+                                    label: resolutionLabel,
                                   ),
-                                ),
+                                if (_hasVisibleVersion)
+                                  _AddonMetadataChip(
+                                    icon: Icons.sell_outlined,
+                                    label: l10n.addonVersionLabel(
+                                      widget.mod.version,
+                                    ),
+                                  ),
                                 if (authorName != null && authorName.isNotEmpty)
                                   _AddonMetadataChip(
                                     icon: Icons.person_outline_rounded,
@@ -4013,9 +4074,8 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
         : l10n.addonAuthorLabel(
             '${widget.mod.providerName == GitHubProvider.staticProviderName ? '@' : ''}$authorName',
           );
-    final summary = widget.mod.summary.trim().isEmpty
-        ? l10n.addonNoDescription
-        : widget.mod.summary;
+    final summary = _resolvedSummary(l10n);
+    final resolutionLabel = _resolutionLabel(l10n);
 
     return Card(
       elevation: 0,
@@ -4087,17 +4147,29 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
                         providerName: widget.mod.providerName,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      l10n.addonVersionLabel(widget.mod.version),
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: colorScheme.outline,
-                        fontWeight: FontWeight.w600,
+                    if (resolutionLabel != null) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: _AddonResolutionChip(
+                          classification: _resolutionClassification,
+                          label: resolutionLabel,
+                        ),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.end,
-                    ),
+                    ],
+                    if (_hasVisibleVersion) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        l10n.addonVersionLabel(widget.mod.version),
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: colorScheme.outline,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.end,
+                      ),
+                    ],
                     const SizedBox(height: 14),
                     SizedBox(
                       width: double.infinity,
@@ -4119,6 +4191,72 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _AddonResolutionChip extends StatelessWidget {
+  final AddonResolutionClassification classification;
+  final String label;
+
+  const _AddonResolutionChip({
+    required this.classification,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final (background, foreground, icon) = switch (classification) {
+      AddonResolutionClassification.exact => (
+        colorScheme.primaryContainer,
+        colorScheme.onPrimaryContainer,
+        Icons.verified_rounded,
+      ),
+      AddonResolutionClassification.branchCompatible => (
+        colorScheme.tertiaryContainer,
+        colorScheme.onTertiaryContainer,
+        Icons.route_rounded,
+      ),
+      AddonResolutionClassification.notVerified => (
+        colorScheme.surfaceContainerHigh,
+        colorScheme.onSurfaceVariant,
+        Icons.info_outline_rounded,
+      ),
+      AddonResolutionClassification.standard => (
+        colorScheme.surfaceContainerHigh,
+        colorScheme.onSurfaceVariant,
+        Icons.label_outline_rounded,
+      ),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: foreground),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: foreground,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

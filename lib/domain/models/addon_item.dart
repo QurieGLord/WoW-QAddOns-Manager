@@ -1,3 +1,5 @@
+import 'package:wow_qaddons_manager/domain/models/addon_resolution_classification.dart';
+
 class AddonItem {
   final String id;
   final String name;
@@ -12,6 +14,7 @@ class AddonItem {
   final String version;
   final String? verifiedDownloadUrl;
   final String? verifiedFileName;
+  final AddonResolutionClassification resolutionClassification;
 
   AddonItem({
     required this.id,
@@ -27,6 +30,7 @@ class AddonItem {
     this.version = 'N/A',
     this.verifiedDownloadUrl,
     this.verifiedFileName,
+    this.resolutionClassification = AddonResolutionClassification.standard,
   });
 
   bool get hasVerifiedPayload {
@@ -50,6 +54,7 @@ class AddonItem {
     'version': version,
     'verifiedDownloadUrl': verifiedDownloadUrl,
     'verifiedFileName': verifiedFileName,
+    'resolutionClassification': resolutionClassification.name,
   };
 
   factory AddonItem.fromJson(Map<String, dynamic> json) {
@@ -73,6 +78,10 @@ class AddonItem {
       version: json['version'] as String? ?? 'N/A',
       verifiedDownloadUrl: json['verifiedDownloadUrl'] as String?,
       verifiedFileName: json['verifiedFileName'] as String?,
+      resolutionClassification: AddonResolutionClassification.values.firstWhere(
+        (value) => value.name == json['resolutionClassification'],
+        orElse: () => AddonResolutionClassification.standard,
+      ),
     );
   }
 
@@ -90,6 +99,7 @@ class AddonItem {
     String? version,
     String? verifiedDownloadUrl,
     String? verifiedFileName,
+    AddonResolutionClassification? resolutionClassification,
   }) {
     return AddonItem(
       id: id ?? this.id,
@@ -105,6 +115,8 @@ class AddonItem {
       version: version ?? this.version,
       verifiedDownloadUrl: verifiedDownloadUrl ?? this.verifiedDownloadUrl,
       verifiedFileName: verifiedFileName ?? this.verifiedFileName,
+      resolutionClassification:
+          resolutionClassification ?? this.resolutionClassification,
     );
   }
 }

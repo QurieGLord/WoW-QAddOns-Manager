@@ -7,6 +7,7 @@ import 'package:wow_qaddons_manager/core/services/search_telemetry_service.dart'
 import 'package:wow_qaddons_manager/core/utils/wow_version_profile.dart';
 import 'package:wow_qaddons_manager/data/network/curseforge_provider.dart';
 import 'package:wow_qaddons_manager/domain/models/addon_item.dart';
+import 'package:wow_qaddons_manager/features/addons/elvui/application/elvui_resolver_service.dart';
 import 'package:wow_qaddons_manager/features/addons/shared/application/services/provider_services.dart';
 
 class SearchCandidate {
@@ -48,6 +49,7 @@ class SearchRepository {
   final CurseForgeService _curseForgeService;
   final GitHubService _gitHubService;
   final WowskillService _wowskillService;
+  final ElvUiResolverService _elvUiResolver;
   final CacheService _cacheService;
   final SearchTelemetryService _telemetryService;
 
@@ -55,6 +57,7 @@ class SearchRepository {
     this._curseForgeService,
     this._gitHubService,
     this._wowskillService,
+    this._elvUiResolver,
     this._cacheService,
     this._telemetryService,
   );
@@ -93,6 +96,17 @@ class SearchRepository {
       _searchCandidateInflightNamespace,
       cacheKey,
       () async {
+        final isElvUiQuery = _elvUiResolver.isElvUiQuery(normalizedQuery);
+        final elvUiItem = isElvUiQuery
+            ? await _elvUiResolver.buildSearchItem(normalizedVersion)
+            : null;
+        final elvUiCandidate = elvUiItem == null
+            ? null
+            : SearchCandidate(
+                item: elvUiItem,
+                rankScore:
+                    _scoreSearchCandidate(elvUiItem, normalizedQuery) + 1200,
+              );
         final providerResults = await Future.wait<_ProviderItemsResult>(
           <Future<_ProviderItemsResult>>[
             _loadProviderItems(
@@ -129,6 +143,9 @@ class SearchRepository {
         );
 
         final merged = <String, SearchCandidate>{};
+        if (elvUiCandidate != null) {
+          merged[elvUiCandidate.key] = elvUiCandidate;
+        }
         for (
           var providerIndex = 0;
           providerIndex < providerResults.length;
@@ -142,6 +159,9 @@ class SearchRepository {
             itemIndex++
           ) {
             final item = items[itemIndex];
+            if (isElvUiQuery && _looksLikeGenericElvUiCoreItem(item)) {
+              continue;
+            }
             final candidate = SearchCandidate(
               item: item,
               rankScore:
@@ -609,6 +629,24 @@ class SearchRepository {
     return tokens.every(
       (token) => normalizedHaystack.contains(_normalizeIdentity(token)),
     );
+  }
+
+  bool _looksLikeGenericElvUiCoreItem(AddonItem item) {
+    if (_elvUiResolver.isManifestBackedItem(item)) {
+      return false;
+    }
+
+    final normalizedName = _normalizeIdentity(item.name);
+    final normalizedSlug = _normalizeIdentity(item.sourceSlug ?? '');
+    if (normalizedName == ElvUiResolverService.addonId ||
+        normalizedSlug == ElvUiResolverService.addonId) {
+      return true;
+    }
+
+    return item.identityHints
+        .map(_normalizeIdentity)
+        .where((hint) => hint.isNotEmpty)
+        .any((hint) => hint == ElvUiResolverService.addonId);
   }
 }
 

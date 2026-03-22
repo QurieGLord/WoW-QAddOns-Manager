@@ -252,6 +252,40 @@ class WowskillProvider extends IAddonProvider {
     );
   }
 
+  @visibleForTesting
+  bool debugMatchesRequestedVersion({
+    required String title,
+    required String url,
+    required String gameVersion,
+  }) {
+    return _matchesRequestedVersion(
+      _WowskillCandidate(url: url, title: title),
+      WowVersionProfile.parse(gameVersion),
+    );
+  }
+
+  @visibleForTesting
+  int debugScoreDownloadEntry({
+    required String gameVersion,
+    required String detailTitle,
+    String detailSummary = '',
+    required String url,
+    String anchorText = '',
+    String contextText = '',
+    String versionLabel = '',
+  }) {
+    return _scoreDownloadEntry(
+      _WowskillDownloadEntry(
+        url: url,
+        anchorText: anchorText,
+        contextText: contextText,
+        versionLabel: versionLabel,
+      ),
+      WowVersionProfile.parse(gameVersion),
+      _detailVersionSignals(rawTitle: detailTitle, summary: detailSummary),
+    );
+  }
+
   Future<_WowskillDetailPage?> _loadDetailPage(
     String url, {
     ProviderRequestContext? requestContext,
@@ -308,6 +342,7 @@ class WowskillProvider extends IAddonProvider {
 
       return _WowskillDetailPage(
         displayName: _normalizeAddonTitle(title, url: url),
+        rawTitle: _cleanupText(title),
         summary: _cleanupText(summary),
         thumbnailUrl: thumbnailUrl,
         galleryUrls: _parseGalleryUrls(html, thumbnailUrl: thumbnailUrl),
@@ -326,12 +361,17 @@ class WowskillProvider extends IAddonProvider {
     String gameVersion,
   ) {
     final profile = WowVersionProfile.parse(gameVersion);
+    final detailSignals = _detailVersionSignals(
+      rawTitle: detail.rawTitle,
+      summary: detail.summary,
+      displayName: detail.displayName,
+    );
     final ranked =
         detail.downloads
             .map(
               (entry) => (
                 entry: entry,
-                score: _scoreDownloadEntry(entry, profile, detail.displayName),
+                score: _scoreDownloadEntry(entry, profile, detailSignals),
               ),
             )
             .where((candidate) => candidate.score > 0)
@@ -348,30 +388,40 @@ class WowskillProvider extends IAddonProvider {
   int _scoreDownloadEntry(
     _WowskillDownloadEntry entry,
     WowVersionProfile profile,
-    String detailTitle,
+    Iterable<String> detailSignals,
   ) {
-    final entrySignals = <String>[
+    final entrySignals = _expandVersionSignals(<String>[
       entry.url,
       entry.anchorText,
       entry.contextText,
       entry.versionLabel,
+    ]);
+    final combinedSignals = <String>[
+      ..._expandVersionSignals(detailSignals),
+      ...entrySignals,
     ];
+    final mergedText = combinedSignals.join(' ').toLowerCase();
 
-    final score = profile.numericCompatibilityScore(entrySignals);
-    if (score > 0) {
-      return score;
-    }
-
-    final mergedText = entrySignals.join(' ').toLowerCase();
     if (profile.containsConflictingVersionMarker(mergedText)) {
       return 0;
     }
 
+    if (_requiresExplicitRetailBranchEvidence(profile) &&
+        !profile.hasExplicitRequestedBranchEvidence(combinedSignals)) {
+      return 0;
+    }
+
+    final score = profile.numericCompatibilityScore(combinedSignals);
+    if (score > 0) {
+      return score;
+    }
+
+    if (_requiresExplicitRetailBranchEvidence(profile)) {
+      return 0;
+    }
+
     final hasKnownMarker = profile.containsKnownVersionMarker(mergedText);
-    final titleHasConflict = profile.containsConflictingVersionMarker(
-      detailTitle.toLowerCase(),
-    );
-    if (!hasKnownMarker && entry.versionLabel.isEmpty && !titleHasConflict) {
+    if (!hasKnownMarker && entry.versionLabel.isEmpty) {
       return 12;
     }
 
@@ -631,6 +681,17 @@ class WowskillProvider extends IAddonProvider {
     String query,
     WowVersionProfile profile,
   ) {
+    final versionSignals = _expandVersionSignals(<String>[title, url]);
+    final mergedSignals = versionSignals.join(' ').toLowerCase();
+    if (profile.containsConflictingVersionMarker(mergedSignals)) {
+      return 0;
+    }
+
+    if (_requiresExplicitRetailBranchEvidence(profile) &&
+        !profile.hasExplicitRequestedBranchEvidence(versionSignals)) {
+      return 0;
+    }
+
     final normalizedTitle = _normalizeIdentity(title);
     final normalizedQuery = _normalizeIdentity(query);
     final normalizedSlug = _normalizeIdentity(_slugFromUrl(url));
@@ -647,10 +708,9 @@ class WowskillProvider extends IAddonProvider {
       score += 110;
     }
 
-    final compatibilityScore = profile.numericCompatibilityScore(<String>[
-      title,
-      url,
-    ]);
+    final compatibilityScore = profile.numericCompatibilityScore(
+      versionSignals,
+    );
     score += compatibilityScore;
 
     return score;
@@ -660,16 +720,51 @@ class WowskillProvider extends IAddonProvider {
     _WowskillCandidate candidate,
     WowVersionProfile profile,
   ) {
-    final text = '${candidate.title} ${candidate.url}'.toLowerCase();
-    if (profile.numericCompatibilityScore(<String>[
-          candidate.title,
-          candidate.url,
-        ]) >
-        0) {
+    final signals = _expandVersionSignals(<String>[
+      candidate.title,
+      candidate.url,
+    ]);
+    final text = signals.join(' ').toLowerCase();
+    if (profile.containsConflictingVersionMarker(text)) {
+      return false;
+    }
+
+    if (_requiresExplicitRetailBranchEvidence(profile)) {
+      return profile.hasExplicitRequestedBranchEvidence(signals);
+    }
+
+    if (profile.numericCompatibilityScore(signals) > 0) {
       return true;
     }
 
     return !profile.containsConflictingVersionMarker(text);
+  }
+
+  bool _requiresExplicitRetailBranchEvidence(WowVersionProfile profile) {
+    return profile.isRetailEra;
+  }
+
+  List<String> _detailVersionSignals({
+    required String rawTitle,
+    required String summary,
+    String displayName = '',
+  }) {
+    return <String>[rawTitle, summary, displayName];
+  }
+
+  List<String> _expandVersionSignals(Iterable<String> values) {
+    final expanded = <String>[];
+    for (final value in values) {
+      final normalized = value.replaceAllMapped(
+        RegExp(r'(?<=\d)[\-_](?=\d)'),
+        (_) => '.',
+      );
+      expanded.add(value);
+      if (normalized != value) {
+        expanded.add(normalized);
+      }
+    }
+    return expanded;
   }
 
   bool _looksLikeAddonDetailPage(String url, String title) {
@@ -1122,6 +1217,7 @@ class _WowskillDownloadEntry {
 
 class _WowskillDetailPage {
   final String displayName;
+  final String rawTitle;
   final String summary;
   final String? thumbnailUrl;
   final List<String> galleryUrls;
@@ -1129,6 +1225,7 @@ class _WowskillDetailPage {
 
   const _WowskillDetailPage({
     required this.displayName,
+    required this.rawTitle,
     required this.summary,
     required this.thumbnailUrl,
     required this.galleryUrls,

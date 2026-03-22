@@ -277,6 +277,24 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get elvuiVerifiedExactClassification => 'Verified exact match';
+
+  @override
+  String get elvuiVerifiedBranchClassification =>
+      'Verified branch-compatible build';
+
+  @override
+  String get elvuiNotVerifiedClassification => 'Not verified';
+
+  @override
+  String get elvuiNotVerifiedAction => 'Not verified';
+
+  @override
+  String elvuiNotVerifiedForVersion(Object version) {
+    return 'ElvUI is not yet verified for client version $version.';
+  }
+
+  @override
   String get addonNoDescription => 'No description available';
 
   @override

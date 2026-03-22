@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-03-23",
+  "entries": [
+    {
+      "id": "elvui-retail-12.0.1",
+      "name": "ElvUI",
+      "source": "official",
+      "flavor": "retail",
+      "clientFamily": "retail",
+      "clientVersionMin": "12.0.1",
+      "clientVersionMax": "12.0.1",
+      "interfaceMin": "120001",
+      "interfaceMax": "120001",
+      "packageVersion": "15.09",
+      "packageUrl": "https://api.tukui.org/v1/download/elvui/WOukshs1qvyDqzGWccPe8Ac7kJkbSjMbd2K8zOSTk2e3xUkEPWIBZ7tnErUjPMP1s4xdXUrngFP41GnQXRT14NiEmOOfQerPzd0DuvNgynhE5xB0RbDBLQAImSTqHqDRbgOhUo1oTpgvHqPw83Wwj4EKGUNxCo5aAYqirS4wlXikXI88NLS6u5Z3IBvYn9l4f_yvrPicFylLE8KFDhEUi6NZsjYu8WIeuJyIh5tfvHhZjxlGXxxf0RhEuGYyCzYi03UyXT00Bg6rkzAaQBUPp2y_7UTUG_UmHsY55nxxpyY1HwD6pThd_MLxZxrRp9GAAOXtDHLUdBn8hlGjUyb7UA",
+      "sha256": "",
+      "classification": "exact",
+      "evidence": [
+        "Official Tukui API patch list includes 12.0.1.",
+        "Official Tukui API payload points to the packaged ElvUI archive."
+      ],
+      "notes": "Curated exact mapping from the official ElvUI package feed.",
+      "author": "Elv",
+      "webUrl": "https://tukui.org/elvui",
+      "changelogUrl": "https://api.tukui.org/v1/changelog/elvui",
+      "thumbnailUrl": "https://storage.tukui.org/ElvUI-Logo-Square.png",
+      "screenshotUrls": [
+        "https://storage.tukui.org/ElvUI-1.jpg",
+        "https://storage.tukui.org/ElvUI-2.jpg",
+        "https://storage.tukui.org/ElvUI-3.jpg",
+        "https://storage.tukui.org/ElvUI-4.jpg"
+      ],
+      "directories": [
+        "ElvUI",
+        "ElvUI_Libraries",
+        "ElvUI_Options"
+      ],
+      "summary": "Official packaged ElvUI build curated for verified client matching."
+    },
+    {
+      "id": "elvui-classic-era-1.15.8",
+      "name": "ElvUI",
+      "source": "official",
+      "flavor": "vanilla",
+      "clientFamily": "vanilla",
+      "clientVersionMin": "1.15.8",
+      "clientVersionMax": "1.15.8",
+      "interfaceMin": "115008",
+      "interfaceMax": "115008",
+      "packageVersion": "15.09",
+      "packageUrl": "https://api.tukui.org/v1/download/elvui/WOukshs1qvyDqzGWccPe8Ac7kJkbSjMbd2K8zOSTk2e3xUkEPWIBZ7tnErUjPMP1s4xdXUrngFP41GnQXRT14NiEmOOfQerPzd0DuvNgynhE5xB0RbDBLQAImSTqHqDRbgOhUo1oTpgvHqPw83Wwj4EKGUNxCo5aAYqirS4wlXikXI88NLS6u5Z3IBvYn9l4f_yvrPicFylLE8KFDhEUi6NZsjYu8WIeuJyIh5tfvHhZjxlGXxxf0RhEuGYyCzYi03UyXT00Bg6rkzAaQBUPp2y_7UTUG_UmHsY55nxxpyY1HwD6pThd_MLxZxrRp9GAAOXtDHLUdBn8hlGjUyb7UA",
+      "sha256": "",
+      "classification": "exact",
+      "evidence": [
+        "Official Tukui API patch list includes 1.15.8.",
+        "Official Tukui API payload points to the packaged ElvUI archive."
+      ],
+      "notes": "Curated exact mapping from the official ElvUI package feed.",
+      "author": "Elv",
+      "webUrl": "https://tukui.org/elvui",
+      "changelogUrl": "https://api.tukui.org/v1/changelog/elvui",
+      "thumbnailUrl": "https://storage.tukui.org/ElvUI-Logo-Square.png",
+      "screenshotUrls": [
+        "https://storage.tukui.org/ElvUI-1.jpg",
+        "https://storage.tukui.org/ElvUI-2.jpg",
+        "https://storage.tukui.org/ElvUI-3.jpg",
+        "https://storage.tukui.org/ElvUI-4.jpg"
+      ],
+      "directories": [
+        "ElvUI",
+        "ElvUI_Libraries",
+        "ElvUI_Options"
+      ],
+      "summary": "Official packaged ElvUI build curated for verified client matching."
+    },
+    {
+      "id": "elvui-burning-crusade-2.5.5",
+      "name": "ElvUI",
+      "source": "official",
+      "flavor": "burningCrusade",
+      "clientFamily": "burningCrusade",
+      "clientVersionMin": "2.5.5",
+      "clientVersionMax": "2.5.5",
+      "interfaceMin": "20505",
+      "interfaceMax": "20505",
+      "packageVersion": "15.09",
+      "packageUrl": "https://api.tukui.org/v1/download/elvui/WOukshs1qvyDqzGWccPe8Ac7kJkbSjMbd2K8zOSTk2e3xUkEPWIBZ7tnErUjPMP1s4xdXUrngFP41GnQXRT14NiEmOOfQerPzd0DuvNgynhE5xB0RbDBLQAImSTqHqDRbgOhUo1oTpgvHqPw83Wwj4EKGUNxCo5aAYqirS4wlXikXI88NLS6u5Z3IBvYn9l4f_yvrPicFylLE8KFDhEUi6NZsjYu8WIeuJyIh5tfvHhZjxlGXxxf0RhEuGYyCzYi03UyXT00Bg6rkzAaQBUPp2y_7UTUG_UmHsY55nxxpyY1HwD6pThd_MLxZxrRp9GAAOXtDHLUdBn8hlGjUyb7UA",
+      "sha256": "",
+      "classification": "exact",
+      "evidence": [
+        "Official Tukui API patch list includes 2.5.5.",
+        "Official Tukui API payload points to the packaged ElvUI archive."
+      ],
+      "notes": "Curated exact mapping from the official ElvUI package feed.",
+      "author": "Elv",
+      "webUrl": "https://tukui.org/elvui",
+      "changelogUrl": "https://api.tukui.org/v1/changelog/elvui",
+      "thumbnailUrl": "https://storage.tukui.org/ElvUI-Logo-Square.png",
+      "screenshotUrls": [
+        "https://storage.tukui.org/ElvUI-1.jpg",
+        "https://storage.tukui.org/ElvUI-2.jpg",
+        "https://storage.tukui.org/ElvUI-3.jpg",
+        "https://storage.tukui.org/ElvUI-4.jpg"
+      ],
+      "directories": [
+        "ElvUI",
+        "ElvUI_Libraries",
+        "ElvUI_Options"
+      ],
+      "summary": "Official packaged ElvUI build curated for verified client matching."
+    },
+    {
+      "id": "elvui-mists-5.5.3",
+      "name": "ElvUI",
+      "source": "official",
+      "flavor": "mistsOfPandaria",
+      "clientFamily": "mistsOfPandaria",
+      "clientVersionMin": "5.5.3",
+      "clientVersionMax": "5.5.3",
+      "interfaceMin": "50503",
+      "interfaceMax": "50503",
+      "packageVersion": "15.09",
+      "packageUrl": "https://api.tukui.org/v1/download/elvui/WOukshs1qvyDqzGWccPe8Ac7kJkbSjMbd2K8zOSTk2e3xUkEPWIBZ7tnErUjPMP1s4xdXUrngFP41GnQXRT14NiEmOOfQerPzd0DuvNgynhE5xB0RbDBLQAImSTqHqDRbgOhUo1oTpgvHqPw83Wwj4EKGUNxCo5aAYqirS4wlXikXI88NLS6u5Z3IBvYn9l4f_yvrPicFylLE8KFDhEUi6NZsjYu8WIeuJyIh5tfvHhZjxlGXxxf0RhEuGYyCzYi03UyXT00Bg6rkzAaQBUPp2y_7UTUG_UmHsY55nxxpyY1HwD6pThd_MLxZxrRp9GAAOXtDHLUdBn8hlGjUyb7UA",
+      "sha256": "",
+      "classification": "exact",
+      "evidence": [
+        "Official Tukui API patch list includes 5.5.3.",
+        "Official Tukui API payload points to the packaged ElvUI archive."
+      ],
+      "notes": "Curated exact mapping from the official ElvUI package feed.",
+      "author": "Elv",
+      "webUrl": "https://tukui.org/elvui",
+      "changelogUrl": "https://api.tukui.org/v1/changelog/elvui",
+      "thumbnailUrl": "https://storage.tukui.org/ElvUI-Logo-Square.png",
+      "screenshotUrls": [
+        "https://storage.tukui.org/ElvUI-1.jpg",
+        "https://storage.tukui.org/ElvUI-2.jpg",
+        "https://storage.tukui.org/ElvUI-3.jpg",
+        "https://storage.tukui.org/ElvUI-4.jpg"
+      ],
+      "directories": [
+        "ElvUI",
+        "ElvUI_Libraries",
+        "ElvUI_Options"
+      ],
+      "summary": "Official packaged ElvUI build curated for verified client matching."
+    }
+  ]
+}

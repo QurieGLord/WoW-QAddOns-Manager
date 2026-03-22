@@ -144,6 +144,16 @@
       "version": {}
     }
   },
+  "elvuiVerifiedExactClassification": "Verified exact match",
+  "elvuiVerifiedBranchClassification": "Verified branch-compatible build",
+  "elvuiNotVerifiedClassification": "Not verified",
+  "elvuiNotVerifiedAction": "Not verified",
+  "elvuiNotVerifiedForVersion": "ElvUI is not yet verified for client version {version}.",
+  "@elvuiNotVerifiedForVersion": {
+    "placeholders": {
+      "version": {}
+    }
+  },
   "addonNoDescription": "No description available",
   "addonDetailsGalleryTitle": "Screenshots",
   "addonDetailsDescriptionTitle": "Description",
