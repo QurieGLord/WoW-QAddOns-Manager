@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io' show exit, stdout;
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -16,6 +18,8 @@ import 'package:wow_qaddons_manager/core/services/file_system_service.dart';
 import 'package:wow_qaddons_manager/core/theme/app_theme.dart';
 import 'package:wow_qaddons_manager/core/utils/wow_version_profile.dart';
 import 'package:wow_qaddons_manager/data/network/github_provider.dart';
+import 'package:wow_qaddons_manager/data/repositories/client_repository.dart';
+import 'package:wow_qaddons_manager/data/services/addon_registry_service.dart';
 import 'package:wow_qaddons_manager/data/services/addon_identity_service.dart';
 import 'package:wow_qaddons_manager/data/services/addon_installer_service.dart';
 import 'package:wow_qaddons_manager/domain/models/addon_feed_state.dart';
@@ -25,11 +29,14 @@ import 'package:wow_qaddons_manager/domain/models/installed_addon.dart';
 import 'package:wow_qaddons_manager/features/addons/local/presentation/local_addons_providers.dart';
 import 'package:wow_qaddons_manager/features/addons/search/application/search_use_cases.dart';
 import 'package:wow_qaddons_manager/features/addons/search/presentation/search_providers.dart';
+import 'package:wow_qaddons_manager/features/addons/shared/application/services/addon_service.dart';
 import 'package:wow_qaddons_manager/features/clients/application/client_use_cases.dart';
 import 'package:wow_qaddons_manager/features/clients/presentation/client_providers.dart';
 import 'package:wow_qaddons_manager/features/settings/presentation/settings_providers.dart';
 import 'package:wow_qaddons_manager/shared/widgets/app_logo_widget.dart';
 import 'package:wow_qaddons_manager/shared/widgets/performance_tracked_scope.dart';
+
+part 'benchmark_support.dart';
 
 const bool kShowPerformanceOverlay = bool.fromEnvironment(
   'SHOW_PERFORMANCE_OVERLAY',
@@ -43,6 +50,12 @@ const String kClientCardAssetsRoot = 'assets/client_cards';
 const String kClientIconAssetsRoot = 'assets/client_icons';
 const Alignment kClientBannerArtAlignment = Alignment(0, -0.46);
 const Alignment kClientBannerArtCompactAlignment = Alignment(0, -0.58);
+const BorderRadius kClientCardBorderRadius = BorderRadius.all(
+  Radius.circular(28),
+);
+const BorderRadius kClientHeroBackdropBorderRadius = BorderRadius.all(
+  Radius.circular(30),
+);
 const CustomMouseWheelScrollConfig kDesktopMouseWheelScrollConfig =
     CustomMouseWheelScrollConfig(
       scrollAmountMultiplier: 2.15,
@@ -54,6 +67,26 @@ const CustomMouseWheelScrollConfig kDesktopMouseWheelScrollConfig =
 enum _ClientBannerVariant { full, medium, small }
 
 enum _ClientBannerUsage { compactCard, mediumHero, largeHeader }
+
+FilterQuality _clientBannerFilterQuality(
+  _ClientBannerUsage usage, {
+  required bool soften,
+}) {
+  return switch (usage) {
+    _ClientBannerUsage.compactCard => FilterQuality.low,
+    _ClientBannerUsage.mediumHero =>
+      soften ? FilterQuality.low : FilterQuality.medium,
+    _ClientBannerUsage.largeHeader => FilterQuality.medium,
+  };
+}
+
+int? _clientBannerCacheWidth(_ClientBannerUsage usage) {
+  return switch (usage) {
+    _ClientBannerUsage.compactCard => 384,
+    _ClientBannerUsage.mediumHero => 1200,
+    _ClientBannerUsage.largeHeader => 1600,
+  };
+}
 
 String _clientBannerAssetPath(
   String slot, [
@@ -142,6 +175,10 @@ class _QddonsDesktopScrollBehavior extends MaterialScrollBehavior {
 }
 
 bool _shouldUseDesktopImprovedScrolling() {
+  if (kBenchmarkDisableImprovedScrolling) {
+    return false;
+  }
+
   switch (defaultTargetPlatform) {
     case TargetPlatform.windows:
     case TargetPlatform.macOS:
@@ -165,6 +202,8 @@ class _DesktopImprovedScrolling extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _benchmarkCount('desktop_improved_scrolling_builds');
+
     if (!_shouldUseDesktopImprovedScrolling()) {
       return child;
     }
@@ -214,6 +253,8 @@ class _DesktopScrollHostState extends State<_DesktopScrollHost> {
 
   @override
   Widget build(BuildContext context) {
+    _benchmarkCount('desktop_scroll_host_builds');
+
     final usesImprovedScrolling = _shouldUseDesktopImprovedScrolling();
     final physics = usesImprovedScrolling
         ? const NeverScrollableScrollPhysics()
@@ -351,16 +392,20 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    await dotenv.load(fileName: ".env");
+    await dotenv.load(fileName: ".docs/.env");
   } catch (e) {
     debugPrint('ENV file not found or failed to load: $e');
   }
 
   final sharedPrefs = await SharedPreferences.getInstance();
+  _benchmarkRecorder.initialize();
 
   runApp(
     ProviderScope(
-      overrides: [sharedPrefsProvider.overrideWithValue(sharedPrefs)],
+      overrides: <Override>[
+        sharedPrefsProvider.overrideWithValue(sharedPrefs),
+        ..._benchmarkProviderOverrides(),
+      ],
       child: const MyApp(),
     ),
   );
@@ -371,12 +416,23 @@ class MyApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    _benchmarkCount('my_app_builds');
+
     final settings = ref.watch(appSettingsProvider);
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       showPerformanceOverlay: kShowPerformanceOverlay,
+      navigatorKey: kBenchmarkMode ? _benchmarkNavigatorKey : null,
       scrollBehavior: const _QddonsDesktopScrollBehavior(),
+      builder: (context, child) {
+        final appChild = child ?? const SizedBox.shrink();
+        if (!kBenchmarkMode) {
+          return appChild;
+        }
+
+        return _BenchmarkAppShell(child: appChild);
+      },
       onGenerateTitle: (context) =>
           AppLocalizations.of(context)?.appTitle ?? 'Qddons Manager',
       themeMode: settings.themeMode,
@@ -510,6 +566,8 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    _benchmarkCount('home_screen_builds');
+
     final settings = ref.watch(appSettingsProvider);
     final locale = settings.locale.languageCode;
     final l10n = AppLocalizations.of(context)!;
@@ -977,16 +1035,20 @@ class _ClientVisualBanner extends StatelessWidget {
   final BorderRadius borderRadius;
   final _ClientBannerUsage bannerUsage;
   final bool compact;
+  final bool isolateRasterLayers;
 
   const _ClientVisualBanner({
     required this.spec,
     required this.borderRadius,
     required this.bannerUsage,
     this.compact = false,
+    this.isolateRasterLayers = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    _benchmarkCount('client_visual_banner_builds');
+
     return ClipRRect(
       borderRadius: borderRadius,
       child: Stack(
@@ -1043,26 +1105,53 @@ class _ClientVisualBanner extends StatelessWidget {
             ),
           ),
           if (spec.bannerAssetSlot != null)
-            _OptionalClientBannerAsset(
-              assetCandidates: _clientBannerAssetCandidates(
-                spec.bannerAssetSlot!,
-                bannerUsage,
-              ),
-              opacity: compact ? 0.2 : 0.28,
-              alignment: compact
-                  ? kClientBannerArtCompactAlignment
-                  : kClientBannerArtAlignment,
-              soften: compact,
+            Positioned.fill(
+              child: isolateRasterLayers
+                  ? RepaintBoundary(
+                      child: _OptionalClientBannerAsset(
+                        assetCandidates: _clientBannerAssetCandidates(
+                          spec.bannerAssetSlot!,
+                          bannerUsage,
+                        ),
+                        bannerUsage: bannerUsage,
+                        opacity: compact ? 0.2 : 0.28,
+                        alignment: compact
+                            ? kClientBannerArtCompactAlignment
+                            : kClientBannerArtAlignment,
+                        soften: compact,
+                      ),
+                    )
+                  : _OptionalClientBannerAsset(
+                      assetCandidates: _clientBannerAssetCandidates(
+                        spec.bannerAssetSlot!,
+                        bannerUsage,
+                      ),
+                      bannerUsage: bannerUsage,
+                      opacity: compact ? 0.2 : 0.28,
+                      alignment: compact
+                          ? kClientBannerArtCompactAlignment
+                          : kClientBannerArtAlignment,
+                      soften: compact,
+                    ),
             ),
           Positioned(
             right: compact ? 18 : 20,
             bottom: compact ? 10 : 14,
-            child: _ClientEraGlyphAsset(
-              spec: spec,
-              size: compact ? 56 : 72,
-              color: spec.overlayColor,
-              opacity: compact ? 0.14 : 0.18,
-            ),
+            child: isolateRasterLayers
+                ? RepaintBoundary(
+                    child: _ClientEraGlyphAsset(
+                      spec: spec,
+                      size: compact ? 56 : 72,
+                      color: spec.overlayColor,
+                      opacity: compact ? 0.14 : 0.18,
+                    ),
+                  )
+                : _ClientEraGlyphAsset(
+                    spec: spec,
+                    size: compact ? 56 : 72,
+                    color: spec.overlayColor,
+                    opacity: compact ? 0.14 : 0.18,
+                  ),
           ),
         ],
       ),
@@ -1072,12 +1161,14 @@ class _ClientVisualBanner extends StatelessWidget {
 
 class _OptionalClientBannerAsset extends StatelessWidget {
   final List<String> assetCandidates;
+  final _ClientBannerUsage bannerUsage;
   final double opacity;
   final Alignment alignment;
   final bool soften;
 
   const _OptionalClientBannerAsset({
     required this.assetCandidates,
+    required this.bannerUsage,
     required this.opacity,
     required this.alignment,
     this.soften = false,
@@ -1085,42 +1176,64 @@ class _OptionalClientBannerAsset extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _benchmarkCount('client_banner_asset_builds');
+
+    if (kBenchmarkDisableBannerImageLayer) {
+      return const SizedBox.shrink();
+    }
+
     Widget buildImage(int index, double effectiveOpacity) {
       if (index >= assetCandidates.length) {
         return const SizedBox.shrink();
       }
 
-      return Opacity(
-        opacity: effectiveOpacity,
-        child: Image.asset(
+      return _benchmarkWrapOpacity(
+        effectiveOpacity,
+        Image.asset(
           assetCandidates[index],
           fit: BoxFit.cover,
           alignment: alignment,
-          filterQuality: FilterQuality.high,
+          cacheWidth: _clientBannerCacheWidth(bannerUsage),
+          filterQuality: _clientBannerFilterQuality(
+            bannerUsage,
+            soften: soften,
+          ),
           errorBuilder: (context, error, stackTrace) =>
               buildImage(index + 1, effectiveOpacity),
         ),
       );
     }
 
-    if (!soften) {
+    if (!soften || kBenchmarkDisableBannerBlurPath) {
       return buildImage(0, opacity);
     }
 
     return Stack(
       fit: StackFit.expand,
       children: [
+        Positioned.fill(child: buildImage(0, opacity * 0.76)),
         Positioned.fill(
-          child: ImageFiltered(
-            imageFilter: ui.ImageFilter.blur(sigmaX: 1.6, sigmaY: 1.6),
-            child: buildImage(0, opacity * 0.92),
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withValues(alpha: 0.04),
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.08),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
-        Positioned.fill(child: buildImage(0, opacity * 0.54)),
       ],
     );
   }
 }
+
 class _ClientEraMedallion extends StatelessWidget {
   final _ClientVisualSpec spec;
   final double size;
@@ -1153,6 +1266,8 @@ class _ClientEraGlyphAsset extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _benchmarkCount('client_era_glyph_builds');
+
     final fallback = Icon(
       spec.emblemIcon,
       size: size,
@@ -1160,12 +1275,16 @@ class _ClientEraGlyphAsset extends StatelessWidget {
     );
 
     if (spec.iconAssetPath == null) {
-      return Opacity(opacity: opacity, child: fallback);
+      return _benchmarkWrapOpacity(opacity, fallback);
     }
 
-    return Opacity(
-      opacity: opacity,
-      child: SvgPicture.asset(
+    if (kBenchmarkDisableSvgOverlay) {
+      return _benchmarkWrapOpacity(opacity, fallback);
+    }
+
+    return _benchmarkWrapOpacity(
+      opacity,
+      SvgPicture.asset(
         spec.iconAssetPath!,
         width: size,
         height: size,
@@ -1374,6 +1493,8 @@ class _ClientCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    _benchmarkCount('client_card_builds');
+
     final l10n = AppLocalizations.of(context)!;
     final colorScheme = Theme.of(context).colorScheme;
     final spec = _buildClientVisualSpec(client, colorScheme);
@@ -1388,165 +1509,186 @@ class _ClientCard extends ConsumerWidget {
       );
     }
 
-    return Card(
-      elevation: 0,
-      clipBehavior: Clip.antiAlias,
-      color: colorScheme.surfaceContainer,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(28),
-        side: BorderSide(
-          color: colorScheme.outlineVariant.withValues(alpha: 0.5),
-          width: 1.5,
+    return RepaintBoundary(
+      child: Card(
+        elevation: 0,
+        clipBehavior: Clip.antiAlias,
+        color: colorScheme.surfaceContainer,
+        shape: RoundedRectangleBorder(
+          borderRadius: kClientCardBorderRadius,
+          side: BorderSide(
+            color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+            width: 1.5,
+          ),
         ),
-      ),
-      child: InkWell(
-        onTap: onOpen,
-        borderRadius: BorderRadius.circular(28),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              height: 110,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  _ClientVisualBanner(
-                    spec: spec,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(28),
-                    ),
-                    bannerUsage: _ClientBannerUsage.compactCard,
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 16, 14, 14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+        child: InkWell(
+          onTap: onOpen,
+          borderRadius: kClientCardBorderRadius,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                height: 110,
+                child: RepaintBoundary(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (kBenchmarkSimplifyDashboardCards)
+                        _BenchmarkSimpleBanner(
+                          colorScheme: colorScheme,
+                          accentColor: spec.accentColor,
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(28),
+                          ),
+                        )
+                      else
+                        _ClientVisualBanner(
+                          spec: spec,
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(28),
+                          ),
+                          bannerUsage: _ClientBannerUsage.compactCard,
+                          isolateRasterLayers: true,
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 16, 14, 14),
+                        child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(
-                              child: Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  _ClientHeroBadge(
-                                    label: _clientBranchLabel(
-                                      l10n,
-                                      client.type,
-                                    ),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      _ClientHeroBadge(
+                                        label: _clientBranchLabel(
+                                          l10n,
+                                          client.type,
+                                        ),
+                                        backgroundColor: Colors.black
+                                            .withValues(alpha: 0.18),
+                                        foregroundColor: Colors.white,
+                                      ),
+                                      _ClientHeroBadge(
+                                        label: client.version,
+                                        backgroundColor: spec.badgeColor
+                                            .withValues(alpha: 0.96),
+                                        foregroundColor: spec.badgeForeground,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                IconButton.filledTonal(
+                                  tooltip: l10n.dashboardRenameClient,
+                                  onPressed: () => _promptRenameClient(
+                                    context,
+                                    ref,
+                                    client,
+                                    Localizations.localeOf(
+                                      context,
+                                    ).languageCode,
+                                  ),
+                                  style: IconButton.styleFrom(
                                     backgroundColor: Colors.black.withValues(
                                       alpha: 0.18,
                                     ),
                                     foregroundColor: Colors.white,
                                   ),
-                                  _ClientHeroBadge(
-                                    label: client.version,
-                                    backgroundColor: spec.badgeColor.withValues(
-                                      alpha: 0.96,
-                                    ),
-                                    foregroundColor: spec.badgeForeground,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton.filledTonal(
-                              tooltip: l10n.dashboardRenameClient,
-                              onPressed: () => _promptRenameClient(
-                                context,
-                                ref,
-                                client,
-                                Localizations.localeOf(context).languageCode,
-                              ),
-                              style: IconButton.styleFrom(
-                                backgroundColor: Colors.black.withValues(
-                                  alpha: 0.18,
+                                  icon: const Icon(Icons.edit_outlined),
                                 ),
-                                foregroundColor: Colors.white,
-                              ),
-                              icon: const Icon(Icons.edit_outlined),
+                              ],
+                            ),
+                            const Spacer(),
+                            Text(
+                              eraLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.headlineSmall
+                                  ?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.4,
+                                  ),
                             ),
                           ],
                         ),
-                        const Spacer(),
-                        Text(
-                          eraLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.headlineSmall
-                              ?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.4,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _ClientEraMedallion(spec: spec, size: 50),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                displayName,
-                                style: Theme.of(context).textTheme.titleLarge
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: -0.4,
-                                    ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                l10n.dashboardClientLocation,
-                                style: Theme.of(context).textTheme.labelMedium
-                                    ?.copyWith(
-                                      color: colorScheme.primary,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: 0.2,
-                                    ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    _ClientPathLine(path: client.path),
-                    const Spacer(),
-                    FilledButton.icon(
-                      onPressed: onOpen,
-                      icon: const Icon(Icons.extension_rounded),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: spec.badgeColor,
-                        foregroundColor: spec.badgeForeground,
-                        minimumSize: const Size.fromHeight(46),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
                       ),
-                      label: Text(l10n.dashboardManageAddons),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (kBenchmarkSimplifyDashboardCards)
+                            _BenchmarkSimpleMedallion(
+                              colorScheme: colorScheme,
+                              accentColor: spec.accentColor,
+                              size: 50,
+                            )
+                          else
+                            _ClientEraMedallion(spec: spec, size: 50),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  displayName,
+                                  style: Theme.of(context).textTheme.titleLarge
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: -0.4,
+                                      ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  l10n.dashboardClientLocation,
+                                  style: Theme.of(context).textTheme.labelMedium
+                                      ?.copyWith(
+                                        color: colorScheme.primary,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 0.2,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      _ClientPathLine(path: client.path),
+                      const Spacer(),
+                      FilledButton.icon(
+                        onPressed: onOpen,
+                        icon: const Icon(Icons.extension_rounded),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: spec.badgeColor,
+                          foregroundColor: spec.badgeForeground,
+                          minimumSize: const Size.fromHeight(46),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        label: Text(l10n.dashboardManageAddons),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1701,6 +1843,8 @@ class _ClientDetailsScreenState extends ConsumerState<ClientDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    _benchmarkCount('client_details_screen_builds');
+
     final locale = ref.watch(appSettingsProvider).locale.languageCode;
     final l10n = AppLocalizations.of(context)!;
     final isSelectionMode = _currentIndex == 0 && _selectedLocalAddons > 0;
@@ -2858,6 +3002,8 @@ class _ClientHeroHeaderDelegate extends SliverPersistentHeaderDelegate {
     double shrinkOffset,
     bool overlapsContent,
   ) {
+    _benchmarkCount('client_hero_header_builds');
+
     final l10n = AppLocalizations.of(context)!;
     final colorScheme = Theme.of(context).colorScheme;
     final spec = _buildClientVisualSpec(client, colorScheme);
@@ -2876,21 +3022,36 @@ class _ClientHeroHeaderDelegate extends SliverPersistentHeaderDelegate {
     return RepaintBoundary(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-        child: Material(
-          color: colorScheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(surfaceRadius),
-          clipBehavior: Clip.antiAlias,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              _ClientVisualBanner(
-                spec: spec,
-                borderRadius: BorderRadius.circular(surfaceRadius),
-                bannerUsage: _ClientBannerUsage.mediumHero,
-                compact: collapseT > 0.42,
-              ),
-              DecoratedBox(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: kBenchmarkSimplifyCollapsingHeader
+                  ? _BenchmarkSimpleBanner(
+                      colorScheme: colorScheme,
+                      accentColor: spec.accentColor,
+                      borderRadius: kClientHeroBackdropBorderRadius,
+                    )
+                  : RepaintBoundary(
+                      child: _ClientVisualBanner(
+                        spec: spec,
+                        borderRadius: kClientHeroBackdropBorderRadius,
+                        bannerUsage: _ClientBannerUsage.mediumHero,
+                        compact: collapseT > 0.42,
+                        isolateRasterLayers: true,
+                      ),
+                    ),
+            ),
+            Positioned.fill(
+              child: DecoratedBox(
                 decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(surfaceRadius),
+                  color: colorScheme.surfaceContainerHigh.withValues(
+                    alpha: compactMode ? 0.12 : 0.08,
+                  ),
+                  border: Border.all(
+                    color: colorScheme.outlineVariant.withValues(alpha: 0.24),
+                  ),
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
@@ -2901,116 +3062,124 @@ class _ClientHeroHeaderDelegate extends SliverPersistentHeaderDelegate {
                   ),
                 ),
               ),
-              Padding(
-                padding: EdgeInsets.fromLTRB(
-                  20 - (4 * visualT),
-                  16 - (2 * visualT),
-                  20 - (4 * visualT),
-                  16 - (4 * visualT),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      height: 30 * topBadgeOpacity,
-                      child: Opacity(
-                        opacity: topBadgeOpacity,
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            _ClientHeroBadge(
-                              label: branchLabel,
-                              backgroundColor: Colors.black.withValues(
-                                alpha: 0.18,
-                              ),
-                              foregroundColor: Colors.white,
+            ),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                20 - (4 * visualT),
+                16 - (2 * visualT),
+                20 - (4 * visualT),
+                16 - (4 * visualT),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    height: 30 * topBadgeOpacity,
+                    child: _benchmarkWrapOpacity(
+                      topBadgeOpacity,
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _ClientHeroBadge(
+                            label: branchLabel,
+                            backgroundColor: Colors.black.withValues(
+                              alpha: 0.18,
                             ),
-                            _ClientHeroBadge(
-                              label: client.version,
-                              backgroundColor: spec.badgeColor.withValues(
-                                alpha: 0.96,
+                            foregroundColor: Colors.white,
+                          ),
+                          _ClientHeroBadge(
+                            label: client.version,
+                            backgroundColor: spec.badgeColor.withValues(
+                              alpha: 0.96,
+                            ),
+                            foregroundColor: spec.badgeForeground,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 10 * (1 - visualT)),
+                  const Spacer(),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Transform.scale(
+                        scale: 1 - (0.08 * visualT),
+                        alignment: Alignment.centerLeft,
+                        child: kBenchmarkSimplifyCollapsingHeader
+                            ? _BenchmarkSimpleMedallion(
+                                colorScheme: colorScheme,
+                                accentColor: spec.accentColor,
+                                size: medallionSize.clamp(40.0, 56.0),
+                              )
+                            : RepaintBoundary(
+                                child: _ClientEraMedallion(
+                                  spec: spec,
+                                  size: medallionSize.clamp(40.0, 56.0),
+                                ),
                               ),
-                              foregroundColor: spec.badgeForeground,
+                      ),
+                      SizedBox(width: 14 - (4 * visualT)),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              client.resolvedDisplayName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleLarge
+                                  ?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.4,
+                                  ),
+                            ),
+                            SizedBox(height: 6 * expandedMetaOpacity),
+                            _benchmarkWrapOpacity(
+                              expandedMetaOpacity,
+                              Text(
+                                '$branchLabel · ${client.version}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelLarge
+                                    ?.copyWith(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.9,
+                                      ),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
                             ),
                           ],
                         ),
                       ),
-                    ),
-                    SizedBox(height: 10 * (1 - visualT)),
-                    const Spacer(),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Transform.scale(
-                          scale: 1 - (0.08 * visualT),
-                          alignment: Alignment.centerLeft,
-                          child: _ClientEraMedallion(
-                            spec: spec,
-                            size: medallionSize.clamp(40.0, 56.0),
-                          ),
-                        ),
-                        SizedBox(width: 14 - (4 * visualT)),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                client.resolvedDisplayName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleLarge
-                                    ?.copyWith(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: -0.4,
-                                    ),
-                              ),
-                              SizedBox(height: 6 * expandedMetaOpacity),
-                              Opacity(
-                                opacity: expandedMetaOpacity,
-                                child: Text(
-                                  '$branchLabel · ${client.version}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.labelLarge
-                                      ?.copyWith(
-                                        color: Colors.white.withValues(
-                                          alpha: 0.9,
-                                        ),
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        _ClientHeroLaunchButton(
-                          label: launchLabel,
-                          isCompact: compactMode,
-                          isLaunching: isLaunching,
-                          onPressed: onLaunch,
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: 12 * expandedMetaOpacity),
-                    ClipRect(
-                      child: Align(
-                        heightFactor: expandedMetaOpacity,
-                        alignment: Alignment.topCenter,
-                        child: Opacity(
-                          opacity: expandedMetaOpacity,
-                          child: _ClientHeaderPathPill(path: client.path),
-                        ),
+                      const SizedBox(width: 12),
+                      _ClientHeroLaunchButton(
+                        label: launchLabel,
+                        isCompact: compactMode,
+                        isLaunching: isLaunching,
+                        onPressed: onLaunch,
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 12 * expandedMetaOpacity),
+                  ClipRect(
+                    child: Align(
+                      heightFactor: expandedMetaOpacity,
+                      alignment: Alignment.topCenter,
+                      child: _benchmarkWrapOpacity(
+                        expandedMetaOpacity,
+                        _ClientHeaderPathPill(path: client.path),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -3227,7 +3396,7 @@ class _SearchFeedSliverContent extends ConsumerWidget {
   }
 }
 
-class _VerifiedFeedSliverSection extends ConsumerWidget {
+class _VerifiedFeedSliverSection extends ConsumerStatefulWidget {
   final ProviderListenable<AddonFeedState> feedProvider;
   final GameClient client;
   final bool showLoadMore;
@@ -3241,9 +3410,72 @@ class _VerifiedFeedSliverSection extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_VerifiedFeedSliverSection> createState() =>
+      _VerifiedFeedSliverSectionState();
+}
+
+class _VerifiedFeedSliverSectionState
+    extends ConsumerState<_VerifiedFeedSliverSection> {
+  final Map<String, AddonInstalledMatch> _installedMatchCache =
+      <String, AddonInstalledMatch>{};
+  String _installedGroupsSignature = '';
+
+  String _buildInstalledGroupsSignature(
+    List<InstalledAddonGroup> installedGroups,
+  ) {
+    return installedGroups
+        .map(
+          (group) => [
+            group.id,
+            group.version ?? '',
+            group.originalId ?? '',
+            group.installedFolders.join(','),
+          ].join(':'),
+        )
+        .join('|');
+  }
+
+  String _buildItemMatchKey(AddonItem item) {
+    return '${item.providerName}:${item.originalId}';
+  }
+
+  List<AddonInstalledMatch> _resolveInstalledMatches(
+    List<AddonItem> items,
+    List<InstalledAddonGroup> installedGroups,
+    AddonService addonService,
+  ) {
+    if (kBenchmarkDisableInstalledMatching) {
+      return List<AddonInstalledMatch>.filled(
+        items.length,
+        AddonInstalledMatch.none,
+        growable: false,
+      );
+    }
+
+    final nextInstalledGroupsSignature = _buildInstalledGroupsSignature(
+      installedGroups,
+    );
+    if (_installedGroupsSignature != nextInstalledGroupsSignature) {
+      _installedGroupsSignature = nextInstalledGroupsSignature;
+      _installedMatchCache.clear();
+    }
+
+    return List<AddonInstalledMatch>.generate(items.length, (index) {
+      final item = items[index];
+      final matchKey = _buildItemMatchKey(item);
+      return _installedMatchCache.putIfAbsent(
+        matchKey,
+        () => addonService.matchInstalledAddon(item, installedGroups),
+      );
+    }, growable: false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _benchmarkCount('verified_feed_section_builds');
+
     final itemsSnapshot = ref.watch(
-      feedProvider.select(_FeedItemsSnapshot.fromState),
+      widget.feedProvider.select(_FeedItemsSnapshot.fromState),
     );
     final locale = ref.watch(
       appSettingsProvider.select((state) => state.locale.languageCode),
@@ -3251,16 +3483,21 @@ class _VerifiedFeedSliverSection extends ConsumerWidget {
     final items = itemsSnapshot.items;
     final installedGroups = ref.watch(
       localAddonsProvider(
-        client,
+        widget.client,
       ).select((state) => state.valueOrNull ?? const <InstalledAddonGroup>[]),
     );
     final addonService = ref.read(addonServiceProvider);
 
-    final installedMatches = List<AddonInstalledMatch>.generate(
-      items.length,
-      (index) =>
-          addonService.matchInstalledAddon(items[index], installedGroups),
-      growable: false,
+    final installedMatchStopwatch = Stopwatch()..start();
+    final installedMatches = _resolveInstalledMatches(
+      items,
+      installedGroups,
+      addonService,
+    );
+    installedMatchStopwatch.stop();
+    _benchmarkRecordDuration(
+      'installed_match_total',
+      installedMatchStopwatch.elapsed,
     );
 
     final children = <Widget>[
@@ -3272,7 +3509,7 @@ class _VerifiedFeedSliverSection extends ConsumerWidget {
             ),
             child: AddonSearchResultTile(
               mod: items[index],
-              client: client,
+              client: widget.client,
               localeCode: locale,
               installedMatch: installedMatches[index],
             ),
@@ -3288,13 +3525,13 @@ class _VerifiedFeedSliverSection extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(horizontal: 24),
           sliver: SliverList.list(children: children),
         ),
-        if (showLoadMore && onLoadMore != null)
+        if (widget.showLoadMore && widget.onLoadMore != null)
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.only(top: 12),
               child: _DiscoveryLoadMoreBar(
-                feedProvider: feedProvider,
-                onPressed: onLoadMore!,
+                feedProvider: widget.feedProvider,
+                onPressed: widget.onLoadMore!,
               ),
             ),
           ),
@@ -3378,6 +3615,12 @@ class _AnimatedFeedEntryState extends State<_AnimatedFeedEntry> {
 
   @override
   Widget build(BuildContext context) {
+    _benchmarkCount('animated_feed_entry_builds');
+
+    if (kBenchmarkDisableEntryAnimations) {
+      return widget.child;
+    }
+
     return AnimatedOpacity(
       opacity: _isVisible ? 1 : 0,
       duration: const Duration(milliseconds: 200),
@@ -3722,10 +3965,7 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
                       ConstrainedBox(
                         constraints: const BoxConstraints(minWidth: 132),
                         child: widget.installedMatch.isInstalled
-                            ? _buildInstalledBadge(
-                                context,
-                                widget.localeCode,
-                              )
+                            ? _buildInstalledBadge(context, widget.localeCode)
                             : _buildAddonActionControl(
                                 context,
                                 widget.localeCode,
@@ -3761,6 +4001,8 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
 
   @override
   Widget build(BuildContext context) {
+    _benchmarkCount('addon_search_result_tile_builds');
+
     final locale = widget.localeCode;
     final l10n = AppLocalizations.of(context)!;
     final colorScheme = Theme.of(context).colorScheme;
@@ -3834,10 +4076,7 @@ class _AddonSearchResultTileState extends ConsumerState<AddonSearchResultTile> {
               ),
               const SizedBox(width: 16),
               ConstrainedBox(
-                constraints: const BoxConstraints(
-                  minWidth: 126,
-                  maxWidth: 146,
-                ),
+                constraints: const BoxConstraints(minWidth: 126, maxWidth: 146),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   mainAxisSize: MainAxisSize.min,

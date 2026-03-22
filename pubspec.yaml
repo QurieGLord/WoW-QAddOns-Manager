@@ -94,7 +94,7 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     - icon.png
-    - .env
+    - .docs/.env
     - assets/client_cards/
     - assets/client_cards/battle_for_azeroth/
     - assets/client_cards/burning_crusade/

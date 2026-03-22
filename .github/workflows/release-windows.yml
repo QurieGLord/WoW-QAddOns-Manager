@@ -1,0 +1,132 @@
+name: Release Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (for example v1.0.0)
+        required: true
+        type: string
+      release_name:
+        description: Release title shown on GitHub
+        required: false
+        default: ""
+        type: string
+      prerelease:
+        description: Mark release as prerelease
+        required: true
+        default: true
+        type: boolean
+      draft:
+        description: Create release as draft
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-release:
+    name: Build and Publish Windows Release
+    runs-on: windows-latest
+
+    env:
+      FLUTTER_VERSION_CHANNEL: stable
+      APP_BUNDLE_NAME: Qddons-Manager
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_VERSION_CHANNEL }}
+          cache: true
+
+      - name: Prepare environment file
+        shell: pwsh
+        run: |
+          $key = "${{ secrets.CURSEFORGE_API_KEY }}"
+          if ([string]::IsNullOrWhiteSpace($key)) {
+            $key = ""
+          }
+          if (-not (Test-Path .docs)) {
+            throw ".docs submodule is missing"
+          }
+          "CURSEFORGE_API_KEY=$key" | Set-Content -Path .docs/.env -Encoding utf8
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Windows release
+        run: flutter build windows --release
+
+      - name: Prepare release assets
+        id: assets
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.inputs.tag }}"
+          $bundleDir = Join-Path $PWD "build/windows/x64/runner/Release"
+          if (-not (Test-Path $bundleDir)) {
+            throw "Windows release bundle not found: $bundleDir"
+          }
+
+          $exe = Get-ChildItem -Path $bundleDir -Filter *.exe | Select-Object -First 1
+          if (-not $exe) {
+            throw "No executable found in $bundleDir"
+          }
+
+          $stagingDir = Join-Path $env:RUNNER_TEMP "${{ env.APP_BUNDLE_NAME }}-windows-x64"
+          if (Test-Path $stagingDir) {
+            Remove-Item $stagingDir -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $stagingDir | Out-Null
+          Copy-Item -Path (Join-Path $bundleDir '*') -Destination $stagingDir -Recurse -Force
+
+          $zipPath = Join-Path $env:RUNNER_TEMP "${{ env.APP_BUNDLE_NAME }}-$tag-windows-x64.zip"
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath -Force
+          }
+          Compress-Archive -Path (Join-Path $stagingDir '*') -DestinationPath $zipPath -Force
+
+          $renamedExePath = Join-Path $env:RUNNER_TEMP "${{ env.APP_BUNDLE_NAME }}-$tag.exe"
+          Copy-Item -Path $exe.FullName -Destination $renamedExePath -Force
+
+          "zip_path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "exe_path=$renamedExePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-bundle
+          path: ${{ steps.assets.outputs.zip_path }}
+          if-no-files-found: error
+
+      - name: Create tag if missing
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.inputs.tag }}"
+          $existing = git tag --list $tag
+          if (-not $existing) {
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag $tag $env:GITHUB_SHA
+            git push origin $tag
+          }
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          name: ${{ github.event.inputs.release_name != '' && github.event.inputs.release_name || github.event.inputs.tag }}
+          draft: ${{ github.event.inputs.draft }}
+          prerelease: ${{ github.event.inputs.prerelease }}
+          fail_on_unmatched_files: true
+          files: |
+            ${{ steps.assets.outputs.zip_path }}
+            ${{ steps.assets.outputs.exe_path }}
